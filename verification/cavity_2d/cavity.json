@@ -1,0 +1,67 @@
+{
+  "dry_run": false,
+  "start": "initial",
+  "max_step": 2000,
+  "restart_file": "",
+  "output_dimensional": true,
+  "Dimensions": {
+    "L0": 1.0,
+    "U0": 1.0,
+    "nu": 0.01
+  },
+  "Grid": {
+    "Nx": 32,
+    "Ny": 4,
+    "Nz": 32,
+    "Lx": 1.0,
+    "Ly": 0.125,
+    "Lz": 1.0,
+    "origin": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "z_type": "uniform"
+  },
+  "Time": {
+    "Co": 0.2,
+    "scheme": "RK2"
+  },
+  "Intervals": {
+    "display": 100,
+    "history": 10,
+    "Instantaneous_file": 500,
+    "averaged_file": 1000,
+    "checkpoint": 1000,
+    "Start_time_for_averaging": 10.0
+  },
+  "Visualization": {
+    "interval": 200,
+    "plane": "xz",
+    "plane_index": 4,
+    "variables": [
+      "velocity",
+      "pressure"
+    ],
+    "output_format": "png",
+    "output_dir": "verification/cavity_2d/viz",
+    "vector_enabled": true,
+    "vector_skip": 2,
+    "text_output": false
+  },
+  "Poisson": {
+    "solver": "RedBlackSOR",
+    "omega": 1.7,
+    "tol": 1e-5,
+    "max_iter": 1000,
+    "on_divergence": "Abort"
+  },
+  "InitialCondition": {
+    "velocity": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "pressure": 0.0
+  }
+}

@@ -1,0 +1,30 @@
+name = "CleanroomSolver"
+uuid = "93dacaec-b53d-448b-9912-9ea887e3fda1"
+version = "0.1.0"
+authors = ["Gemini Code Assist"]
+
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+FLoops = "cc61a311-1640-44b5-9fba-1b764f453329"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[extensions]
+CleanroomVisualizationExt = "CairoMakie"
+
+[compat]
+CairoMakie = "0.15.8"
+FLoops = "0.2.2"
+JSON3 = "1.14.3"
+LinearAlgebra = "1.12.0"
+Printf = "1.11.0"
+Test = "1.11.0"
+julia = "1.10"
+
+[extras]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "CairoMakie"]

@@ -1,0 +1,55 @@
+{
+  "faces": {
+    "x_min": {
+      "type": "Dirichlet",
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "x_max": {
+      "type": "Dirichlet",
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "y_min": {
+      "type": "Dirichlet",
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "y_max": {
+      "type": "Dirichlet",
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "z_min": {
+      "type": "Dirichlet",
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "z_max": {
+      "type": "Dirichlet",
+      "value": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "Inlets": [],
+  "Outlets": [],
+  "InternalBoundaries": []
+}
