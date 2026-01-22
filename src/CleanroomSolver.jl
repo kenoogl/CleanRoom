@@ -154,8 +154,6 @@ function run_simulation(param_file::String)
         step += 1
         
         # Advance one time step
-
-        
         pitr, pres = advance!(
             buffers, grid, bc_set, t_conf, sim_params.poisson, 0.1, nu_lam, dt_fixed, "thread",
             rk_buffers=rk_buffers

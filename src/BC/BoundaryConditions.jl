@@ -425,14 +425,34 @@ function apply_boundary_conditions!(
     # Apply Velocity BCs
     apply_velocity_bcs!(buffers.u, buffers.v, buffers.w, grid, bc_set, dt)
     
-    # Apply Periodic Pressure BCs if needed
-    y_periodic = bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
-    x_periodic = bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
-    z_periodic = bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+    # Apply Periodic Pressure BCs
+    apply_periodic_pressure!(buffers.p, grid, bc_set)
+end
+
+"""
+    apply_periodic_pressure!(p, grid, bc_set)
+
+BoundaryConditionSetに基づいて圧力の周期境界条件を適用する。
+"""
+function apply_periodic_pressure!(
+    p::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet
+)
+    # Y-direction periodic
+    if bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :y)
+    end
     
-    if y_periodic; apply_periodic_pressure!(buffers.p, grid, :y); end
-    if x_periodic; apply_periodic_pressure!(buffers.p, grid, :x); end
-    if z_periodic; apply_periodic_pressure!(buffers.p, grid, :z); end
+    # X-direction periodic
+    if bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :x)
+    end
+    
+    # Z-direction periodic
+    if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :z)
+    end
 end
 
 end # module BoundaryConditions

@@ -29,48 +29,7 @@ struct PoissonConfig
     on_divergence::DivergenceAction  # 収束失敗時の動作
 end
 
-"""
-    apply_periodic_pressure!(p, grid, bc_set)
 
-周期境界条件の圧力ゴーストセル交換。
-"""
-function apply_periodic_pressure!(
-    p::Array{Float64, 3},
-    grid::GridData,
-    bc_set::BoundaryConditionSet
-)
-    mx, my, mz = grid.mx, grid.my, grid.mz
-    
-    # Y-direction periodic
-    if bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
-        @inbounds for k in 1:mz, i in 1:mx
-            p[i, 1, k] = p[i, my-3, k]
-            p[i, 2, k] = p[i, my-2, k]
-            p[i, my-1, k] = p[i, 3, k]
-            p[i, my, k] = p[i, 4, k]
-        end
-    end
-    
-    # X-direction periodic
-    if bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
-        @inbounds for k in 1:mz, j in 1:my
-            p[1, j, k] = p[mx-3, j, k]
-            p[2, j, k] = p[mx-2, j, k]
-            p[mx-1, j, k] = p[3, j, k]
-            p[mx, j, k] = p[4, j, k]
-        end
-    end
-    
-    # Z-direction periodic
-    if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
-        @inbounds for j in 1:my, i in 1:mx
-            p[i, j, 1] = p[i, j, mz-3]
-            p[i, j, 2] = p[i, j, mz-2]
-            p[i, j, mz-1] = p[i, j, 3]
-            p[i, j, mz] = p[i, j, 4]
-        end
-    end
-end
 
 """
     solve_poisson!(buffers, grid, config, bc_set, par)

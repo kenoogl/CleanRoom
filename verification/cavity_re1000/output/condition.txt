@@ -1,0 +1,38 @@
+=== Calculation Conditions ===
+Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity_re1000/cavity.json
+
+--- Physical Parameters ---
+  Reference Length L0:              1 [m]    
+  Reference Velocity U0:            1 [m/s]  
+  Kinematic Viscosity ν:   1.0000e-03 [m²/s] 
+  Reynolds Number Re:            1000        
+  Reference Time T0:                1 [s]    
+
+--- Grid Parameters ---
+  Grid Size (Nx,Ny,Nz):  (32, 32, 32)
+  Domain Lx:                        1 [m]
+  Domain Ly:                        1 [m]
+  Domain Lz:                        1 [m]
+  Cell Δx:                    0.03125 [m]
+  Cell Δy:                    0.03125 [m]
+  Cell Δz:                    0.03125 [m] (min)
+                              0.03125 [m] (max)
+
+--- Time Integration ---
+  Time Scheme:           RK2
+  Courant Number:                 0.2
+  Fixed Time Step Δt*:        0.00625 (dimensionless)
+  Fixed Time Step Δt:         0.00625 [s]
+  Max Steps:                     3200
+  Total Simulation Time:           20 [s]
+
+--- Poisson Solver ---
+  Solver:                RedBlackSOR
+  Convergence Criteria:       1.0e-05
+  Max Iterations:                1000
+
+--- Output Intervals ---
+  Display:                    100 steps
+  History:                     10 steps
+  Instantaneous:              400 steps
+  Checkpoint:                 800 steps

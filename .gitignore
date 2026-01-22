@@ -5,7 +5,7 @@
 *.jl.mem
 
 # Output Directory
-output/
+
 
 # Binary Data
 *.sph
@@ -24,4 +24,4 @@ Thumbs.db
 # IDE/Editor
 .vscode/
 .idea/
-.kiro/
+
