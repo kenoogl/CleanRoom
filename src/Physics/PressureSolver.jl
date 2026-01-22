@@ -5,6 +5,7 @@ using ..Fields
 using ..Grid
 using ..BoundaryConditions
 using LinearAlgebra # for norm
+using FLoops
 
 export SolverType, DivergenceAction, PoissonConfig
 export RedBlackSOR, CG, BiCGSTAB, WarnContinue, Abort
@@ -92,6 +93,7 @@ end
     solve_poisson_sor!(buffers, grid, config, bc_set, par)
     
 Red-Black SOR法による実装
+参考: /Users/Daily/Development/H2/src/NonUniform.jl (rbsor_core!, rbsor!, solveSOR!)
 """
 function solve_poisson_sor!(
     buffers::CFDBuffers,
@@ -113,84 +115,86 @@ function solve_poisson_sor!(
     
     dx = grid.dx
     dy = grid.dy
-    idx2 = 1.0 / dx^2
-    idy2 = 1.0 / dy^2
+    # 非等方係数のため、それぞれの面積・距離成分を計算
+    
+    # ワーク配列なしで、ループ内で係数を計算する方式（NonUniform.jlのrbsor_core!と同様）
+    # これによりメモリ使用量を抑えつつ、キャッシュ効率を上げる
     
     while iter < config.max_iter
         iter += 1
-        max_res = 0.0
+        total_res_sq = 0.0
         
         # SOR Loop (Red/Black)
         for color in 0:1
-            @inbounds for k in 3:mz-2
+            @floop for k in 3:mz-2, j in 3:my-2
+                # k-dependent geometry properties
+                dz_k_val = grid.dz[k]
                 dZ_p = grid.z_center[k+1] - grid.z_center[k]
                 dZ_m = grid.z_center[k] - grid.z_center[k-1]
-                dz = grid.dz[k]
                 
-                c_t = 1.0 / (dz * dZ_p)
-                c_b = 1.0 / (dz * dZ_m)
+                # Z coefficients
+                base_cz_p = (dx * dy) / dZ_p
+                base_cz_m = (dx * dy) / dZ_m
                 
-                for j in 3:my-2
-                    for i in 3:mx-2
-                        if mask[i, j, k] == 0.0
-                            continue
-                        end
-                        
-                        if (i + j + k) % 2 != color
-                            continue
-                        end
-                        
-                        denom = 0.0
-                        sum_neighbors = 0.0
-                        
-                        # X-neighbors
-                        if mask[i-1, j, k] > 0
-                            sum_neighbors += p[i-1, j, k] * idx2
-                            denom += idx2
-                        end
-                        if mask[i+1, j, k] > 0
-                            sum_neighbors += p[i+1, j, k] * idx2
-                            denom += idx2
-                        end
-                        
-                        # Y-neighbors
-                        if mask[i, j-1, k] > 0
-                            sum_neighbors += p[i, j-1, k] * idy2
-                            denom += idy2
-                        end
-                        if mask[i, j+1, k] > 0
-                            sum_neighbors += p[i, j+1, k] * idy2
-                            denom += idy2
-                        end
-                        
-                        # Z-neighbors
-                        if mask[i, j, k-1] > 0
-                            sum_neighbors += p[i, j, k-1] * c_b
-                            denom += c_b
-                        end
-                        if mask[i, j, k+1] > 0
-                            sum_neighbors += p[i, j, k+1] * c_t
-                            denom += c_t
-                        end
-                        
-                        if denom == 0.0
-                             continue
-                        end
-                        
-                        # SOR update
-                        p_star = (sum_neighbors - rhs[i, j, k]) / denom
-                        p_new = (1.0 - config.omega) * p[i, j, k] + config.omega * p_star
-                        
-                        # Residual
-                        res = abs(p_new - p[i, j, k])
-                        if res > max_res
-                            max_res = res
-                        end
-                        
-                        p[i, j, k] = p_new
-                    end
+                # Y coefficients
+                base_cy = (dx * dz_k_val) / dy
+                
+                # X coefficients
+                base_cx = (dy * dz_k_val) / dx
+                
+                # Volume element
+                vol = dx * dy * dz_k_val
+
+                # Red/Black check
+                
+                @simd for i in (3 + (j + k + color + 1) % 2):2:mx-2
+                    m0 = mask[i, j, k]
+                    
+                    # Neighbor masks
+                    m_xm = mask[i-1, j, k]
+                    m_xp = mask[i+1, j, k]
+                    m_ym = mask[i, j-1, k]
+                    m_yp = mask[i, j+1, k]
+                    m_zm = mask[i, j, k-1]
+                    m_zp = mask[i, j, k+1]
+                    
+                    # Coefficients
+                    cond_xm = base_cx * (m_xm * m0)
+                    cond_xp = base_cx * (m_xp * m0)
+                    cond_ym = base_cy * (m_ym * m0)
+                    cond_yp = base_cy * (m_yp * m0)
+                    cond_zm = base_cz_m * (m_zm * m0)
+                    cond_zp = base_cz_p * (m_zp * m0)
+                    
+                    # Diagonal term
+                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+                    
+                    # RHS term
+                    b_val = rhs[i, j, k] * vol
+                    
+                    # Neighbor sum
+                    ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+                         cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+                         cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+                    
+                    # Update
+                    pp = p[i, j, k]
+                    dp = ((ss - b_val) / dd - pp) * m0
+                    p_new = pp + config.omega * dp
+                    
+                    # Residual
+                    # NonUniform.jl: r = (dd + ω * (cond_xm + cond_ym + cond_zm)) * dp / ω
+                    sum_cond_minus = cond_xm + cond_ym + cond_zm
+                    r_val = (dd + config.omega * sum_cond_minus) * dp / config.omega
+                    
+                    res_sq = r_val * r_val
+                    @reduce(local_res_sum = 0.0 + res_sq)
+                    
+                    p[i, j, k] = p_new
                 end
             end
+            
+            total_res_sq += local_res_sum
         end
         
         # Apply periodic BC
@@ -198,7 +202,7 @@ function solve_poisson_sor!(
             apply_periodic_pressure!(p, grid, bc_set)
         end
         
-        residual = max_res
+        residual = sqrt(total_res_sq)
         if residual < config.tol
             converged = true
             break

@@ -15,7 +15,7 @@ Example:
     julia tools/visualize_cavity.jl verification/cavity/output/vel 1000 2000
 """
 
-using Plots
+using CairoMakie
 
 """
 Read SPH vector file (V-Isio format)
@@ -127,39 +127,42 @@ Plot cavity flow centerline profiles in Ghia et al. paper format
 - Right panel: w velocity vs x (horizontal centerline at z=0.5)
 """
 function plot_profiles(data, profiles; output_path=nothing, title_suffix="")
-    # Two-panel layout like Ghia et al. (1982)
-    p = plot(
-        layout=(1, 2),
-        size=(900, 400),
-        dpi=150,
-        margin=5Plots.mm,
-        plot_title="Cavity Flow (Step $(data.step), t=$(round(data.time, digits=2)))$(title_suffix)"
-    )
+    # Two-panel layout
+    fig = Figure(size = (800, 400))
     
-    # Left panel: u vs z (vertical centerline at x=0.5)
-    plot!(p[1], profiles.u_centerline, profiles.z_coords,
-          xlabel="u", ylabel="z",
-          title="u at x=$(round(profiles.x_val, digits=2))",
-          linewidth=2, marker=:circle, markersize=4,
-          label="Present",
-          legend=:bottomright,
-          xlim=(-0.5, 1.2), ylim=(0, 1))
+    supertitle = "Cavity Flow (Step $(data.step), t=$(round(data.time, digits=2)))$(title_suffix)"
+    Label(fig[0, :], supertitle, fontsize = 20)
     
-    # Right panel: w vs x (horizontal centerline at z=0.5)
-    plot!(p[2], profiles.x_coords, profiles.w_centerline,
-          xlabel="x", ylabel="w",
-          title="w at z=$(round(profiles.z_val, digits=2))",
-          linewidth=2, marker=:circle, markersize=4,
-          label="Present",
-          legend=:topright,
-          xlim=(0, 1), ylim=(-0.3, 0.3))
+    # Left panel: u vs z
+    ax1 = Axis(fig[1, 1], xlabel = "u", ylabel = "z", 
+               title = "u at x=$(round(profiles.x_val, digits=2))",
+               limits = ((-0.5, 1.2), (0, 1)),
+               aspect = AxisAspect(1),
+               xticklabelpad = 5, yticklabelpad = 5,
+               xlabelpadding = 10, ylabelpadding = 10)
+    
+    scatterlines!(ax1, profiles.u_centerline, profiles.z_coords, 
+                  label = "Present", color = :blue, markersize = 8)
+    axislegend(ax1, position = :rb)
+    
+    # Right panel: w vs x
+    ax2 = Axis(fig[1, 2], xlabel = "x", ylabel = "w", 
+               title = "w at z=$(round(profiles.z_val, digits=2))",
+               limits = ((0, 1), (-0.3, 0.3)),
+               aspect = AxisAspect(1),
+               xticklabelpad = 5, yticklabelpad = 5,
+               xlabelpadding = 10, ylabelpadding = 10)
+    
+    scatterlines!(ax2, profiles.x_coords, profiles.w_centerline, 
+                  label = "Present", color = :blue, markersize = 8)
+    axislegend(ax2, position = :rt)
     
     if !isnothing(output_path)
-        savefig(p, output_path)
+        save(output_path, fig)
         println("Saved: $output_path")
     end
     
-    return p
+    return fig
 end
 
 """
