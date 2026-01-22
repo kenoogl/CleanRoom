@@ -82,8 +82,10 @@
 #### Acceptance Criteria
 1. The Solver shall 読み込んだ有次元パラメータを、代表長さ(L₀)・代表速度(U₀)を用いて無次元量に変換する
 2. The Solver shall 内部計算を無次元量で実行する
-3. When Output_dimensional="yes"の場合, the Solver shall バイナリ出力時に無次元量を有次元量に逆変換する
-4. The Solver shall デフォルトで無次元量のまま出力する（Output_dimensional="no"）
+3. The Solver shall SPH出力を常に有次元量で出力する
+4. The Solver shall チェックポイントを常に無次元量で保存する
+5. The Solver shall history/コンソール出力を無次元量で出力する
+6. The Solver shall 可視化画像/断面テキストを有次元量で出力する
 
 #### 無次元化規則
 
@@ -96,17 +98,15 @@
 | 圧力 | p* = p / U₀² | 動圧基準（ρ₀ = 1のため p* = p / U₀²） |
 | レイノルズ数 | Re = U₀L₀/ν | ν: Kinematic_Viscosityから計算 |
 
-#### Output_dimensionalの適用範囲
+#### 出力の次元規約
 
-`Output_dimensional`はバイナリ出力（SPH、チェックポイント）のみに適用される：
-
-| 出力種別 | Output_dimensional適用 | 備考 |
-| -------- | ---------------------- | ---- |
-| SPHファイル（vel, prs, vel_avg） | 適用 | 有次元/無次元を切替可能 |
-| チェックポイント | 適用 | ヘッダにis_dimensionalフラグを記録 |
-| historyファイル | 非適用 | 常に無次元量で出力 |
-| コンソール表示 | 非適用 | 常に無次元量で表示 |
-| 可視化画像 | 非適用 | 常に有次元量で表示 |
+| 出力種別 | 次元 | 備考 |
+| -------- | ---- | ---- |
+| SPHファイル（vel, prs, vel_avg） | 有次元 | 変換設定は持たない |
+| チェックポイント | 無次元 | is_dimensionalは常に0 |
+| historyファイル | 無次元 | 常に無次元量で出力 |
+| コンソール表示 | 無次元 | 常に無次元量で表示 |
+| 可視化画像/断面テキスト | 有次元 | 可視化は有次元で出力 |
 
 ### Requirement 4: 空間離散化
 **Objective:** As a シミュレーションエンジニア, I want 有限体積法で空間離散化できる, so that 保存則を満たす数値解が得られる
@@ -439,10 +439,10 @@ Ghost(max側) ← Inner(min側)
 2. The Solver shall 境界条件をJSON形式で読み込む
 3. When Z_grid.typeが"non-uniform"の場合, the Solver shall Z方向格子座標をテキスト形式で読み込む
 4. When start="initial"の場合, the Solver shall 初期条件（一様速度ベクトル）をJSON形式で読み込む
-5. The Solver shall 速度場および圧力場をV-Isio SPH形式（バイナリ、単精度、Fortran unformatted互換）で出力する
-6. The Solver shall チェックポイントデータをヘッダ付き倍精度バイナリ形式で指定時間間隔毎に保存する（ヘッダ: 格子数、ステップ数、時刻、次元フラグ、代表量）
+5. The Solver shall 速度場および圧力場をV-Isio SPH形式（バイナリ、単精度、Fortran unformatted互換）で有次元量として出力する
+6. The Solver shall チェックポイントデータを無次元のヘッダ付き倍精度バイナリ形式で指定時間間隔毎に保存する（ヘッダ: 格子数、ステップ数、時刻、次元フラグ=0、代表量）
 7. When start="restart"の場合, the Solver shall Restart.fileで指定されたチェックポイントファイルから計算を再開する
-8. When start="restart"かつチェックポイントが有次元の場合, the Solver shall 読み込んだデータを無次元化してから計算を継続する
+8. When start="restart"かつチェックポイントの次元フラグが0以外の場合, the Solver shall エラーメッセージを出力し計算を停止する
 9. When 計算パラメータが読み込まれた時, the Solver shall CFL条件（クーラン数）と拡散数による安定条件をチェックする
 10. If 安定条件を満たさない場合, then the Solver shall 警告を表示し計算を停止する（dry_run時は警告のみ）
 11. The Solver shall 指定間隔で計算モニター情報をコンソールに表示する
@@ -523,6 +523,8 @@ mean_new = mean_old + (x - mean_old) / n
 
 #### SPHファイル仕様（単精度・ベクトル）
 
+出力は常に有次元量で行う。
+
 エンディアン: **リトルエンディアン**
 
 | レコード   | 内容                         | 備考                                    |
@@ -540,6 +542,8 @@ mean_new = mean_old + (x - mean_old) / n
 - これにより、最後のセルセンターは `XORG + (N - 0.5) * DX` となり、計算領域端（壁面位置）には達しない
 
 #### SPHファイル仕様（単精度・スカラー）
+
+出力は常に有次元量で行う。
 
 エンディアン: **リトルエンディアン**
 
@@ -575,7 +579,7 @@ mean_new = mean_old + (x - mean_old) / n
 | Nx, Ny, Nz | Int32 × 3 | 内部セル数 |
 | step | Int32 | タイムステップ数 |
 | time | Float64 | 計算時刻 |
-| is_dimensional | Int32 | 0: 無次元, 1: 有次元 |
+| is_dimensional | Int32 | 0固定（無次元のみ） |
 | Reference_Length | Float64 | 代表長さ L₀ [m] |
 | Reference_Velocity | Float64 | 代表速度 U₀ [m/s] |
 | **データ部** | | |
@@ -586,23 +590,10 @@ mean_new = mean_old + (x - mean_old) / n
 
 ※ 配列サイズ(Nx+4, Ny+4, Nz+4)はWENO3の5点ステンシルに対応するゴーストセル（各軸両側2セル）を含む
 
-#### リスタート時の無次元化処理
+#### 次元フラグの扱い
 
-チェックポイントファイルが有次元（is_dimensional=1）で保存されている場合、リスタート時に以下の無次元化処理を行う：
-
-```
-# ヘッダから代表量を読み込み
-L₀ = Reference_Length
-U₀ = Reference_Velocity
-
-# 速度の無次元化
-u* = u / U₀
-v* = v / U₀
-w* = w / U₀
-
-# 圧力の無次元化（ρ₀ = 1）
-p* = p / U₀²
-```
+- is_dimensionalは常に0（無次元）
+- 0以外の場合はフォーマット不正としてエラー終了する
 
 ※ リスタート時のJSON設定（Reference_Length, Reference_Velocity）とチェックポイントヘッダの値が一致することを確認し、不一致の場合は警告を出力する
 
@@ -651,19 +642,23 @@ p* = p / U₀²
     "interval": 1000,                     // 可視化出力間隔[step]
     "plane": "xy",                        // (xy | xz | yz) 可視化断面
     "plane_index": 15,                    // 断面インデックス（指定軸に垂直な断面位置、1オリジン）
-    "variable": ["velocity", "pressure"], // 可視化対象変数
-    "output_format": "png"                // (png | svg) 出力画像形式
+    "variables": ["velocity", "pressure"], // 可視化対象変数
+    "output_format": "png",               // (png | svg) 出力画像形式
+    "output_dir": "viz",                  // 出力ディレクトリ（output配下）
+    "vector_enabled": false,              // ベクトル矢印表示
+    "vector_skip": 1,                     // ベクトル間引き数
+    "text_output": false                  // 断面テキスト出力
   },
   "Poisson_parameter": {
     "solver": "RedBlackSOR",              // (RedBlackSOR | CG | BiCGSTAB) ソルバー種別
     "coef_acceleration": 0.9,             // RedBlackSOR加速係数（RedBlackSOR時のみ有効）
     "convergence_criteria": 1.0e-3,       // 収束判定値
-    "Iteration_max": 100                  // 最大反復回数
+    "Iteration_max": 100,                 // 最大反復回数
+    "on_divergence": "WarnContinue"       // (WarnContinue | Abort) 収束失敗時の動作
   },
   "Start_time_for_averaging": 0.0,        // [sec] 平均化開始時刻
   "Time_Integration_Scheme": "Euler",     // (Euler | RK2 | RK4) 時間積分スキーム
   "divMax_threshold": 1.0e-3,             // [-] 発散検出閾値
-  "Output_dimensional": "no",             // (yes | no) 出力を有次元に変換（デフォルト: no=無次元）
   "Initial_Condition": {
     "velocity": [0.0, 0.0, 0.0],          // [m/s] 初期速度ベクトル（一様）
     "pressure": 0.0                        // [Pa] 初期圧力値（一様）
@@ -799,8 +794,12 @@ dry_run有効時に以下を実行する：
 | interval | Int | 可視化出力間隔[step] |
 | plane | String | 可視化断面（xy, xz, yz） |
 | plane_index | Int | 断面インデックス（指定軸に垂直な断面位置、1オリジン） |
-| variable | Array[String] | 可視化対象変数（velocity, pressure） |
+| variables | Array[String] | 可視化対象変数（velocity, pressure） |
 | output_format | String | 出力画像形式（png, svg） |
+| output_dir | String | 出力ディレクトリ（output配下） |
+| vector_enabled | Bool | ベクトル矢印表示の有効化 |
+| vector_skip | Int | ベクトル間引き数 |
+| text_output | Bool | 断面テキスト出力の有効化 |
 
 #### 可視化出力形式
 

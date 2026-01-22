@@ -1,63 +1,21 @@
 {
-  "faces": {
-    "x_min": {
-      "type": "Dirichlet",
-      "value": [
-        0.0,
-        0.0,
-        0.0
-      ]
-    },
-    "x_max": {
-      "type": "Outflow"
-    },
-    "y_min": {
-      "type": "Neumann"
-    },
-    "y_max": {
-      "type": "Neumann"
-    },
-    "z_min": {
-      "type": "Dirichlet",
-      "value": [
-        0.0,
-        0.0,
-        0.0
-      ]
-    },
-    "z_max": {
-      "type": "Dirichlet",
-      "value": [
-        0.0,
-        0.0,
-        0.0
-      ]
-    }
+  "external_boundaries": {
+    "x_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
+    "x_max": { "velocity": "outflow" },
+    "y_min": { "velocity": "neumann" },
+    "y_max": { "velocity": "neumann" },
+    "z_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
+    "z_max": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] }
   },
-  "Inlets": [
+  "inlets": [
     {
-      "shape": "rectangular",
-      "position": [
-        0.1,
-        0.5,
-        0.5
-      ],
-      "size": [
-        0.2,
-        0.2
-      ],
-      "normal": [
-        1,
-        0,
-        0
-      ],
-      "velocity": [
-        1.0,
-        0.0,
-        0.0
-      ]
+      "type": "rectangular",
+      "position": [0.1, 0.5, 0.5],
+      "size": [0.2, 0.2],
+      "normal": [1, 0, 0],
+      "velocity": [1.0, 0.0, 0.0]
     }
   ],
-  "Outlets": [],
-  "InternalBoundaries": []
+  "outlets": [],
+  "internal_boundaries": []
 }

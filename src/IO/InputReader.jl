@@ -52,7 +52,8 @@ struct SimulationParams
     visualization::VizConfig
     poisson::PoissonConfig
     time_scheme::Symbol   # :Euler, :RK2, :RK4
-    output_dimensional::Bool
+    smagorinsky_constant::Float64
+    div_max_threshold::Float64
     initial_condition::InitialCondition
     restart_file::String
 end
@@ -71,6 +72,18 @@ function parse_tuple2(arr)
     return (Float64(arr[1]), Float64(arr[2]))
 end
 
+function parse_yesno(value, key::String)::Bool
+    if value isa AbstractString
+        v = lowercase(String(value))
+        if v == "yes"
+            return true
+        elseif v == "no"
+            return false
+        end
+    end
+    error("Invalid value for $(key): expected \"yes\" or \"no\".")
+end
+
 """
     load_parameters(filepath::String)::SimulationParams
 
@@ -85,44 +98,69 @@ function load_parameters(filepath::String)::SimulationParams
     data = JSON3.read(json_str)
 
     # --- Basic Params ---
-    dry_run = get(data, :dry_run, false)
-    start_mode = Symbol(get(data, :start, "initial"))
-    max_step = data.max_step
-    restart_file = get(data, :restart_file, "")
-    output_dimensional = get(data, :output_dimensional, true)
+    dry_run = parse_yesno(get(data, :dry_run, "no"), "dry_run")
+    start_str = lowercase(String(get(data, :start, "initial")))
+    start_mode = if start_str == "initial"
+        :initial
+    elseif start_str == "restart"
+        :restart
+    else
+        error("Invalid start mode: $(start_str)")
+    end
+    max_step = Int(get(data, :Max_step, 0))
+    if max_step <= 0
+        error("Max_step must be > 0.")
+    end
 
     # --- Dimensions ---
-    dims = data.Dimensions
-    L0 = Float64(dims.L0)
-    U0 = Float64(dims.U0)
-    nu = Float64(dims.nu)
+    L0 = Float64(data.Reference_Length)
+    U0 = Float64(data.Reference_Velocity)
+    nu = Float64(data.Kinematic_Viscosity)
     Re = U0 * L0 / nu
     T0 = L0 / U0
     dim_params = DimensionParams(L0, U0, nu, Re, T0)
 
+    # --- Model Params ---
+    smagorinsky_constant = Float64(get(data, :Smagorinsky_Constant, 0.2))
+    div_max_threshold = Float64(get(data, :divMax_threshold, 1.0e-3))
+
     # --- Grid ---
-    g = data.Grid
-    origin = parse_tuple3(g.origin)
-    z_type = Symbol(g.z_type)
-    z_file = get(g, :z_file, "")
-    # Spec update: Lz is needed if uniform
-    Lz = haskey(g, :Lz) ? Float64(g.Lz) : 0.0 # Handle optional if non-uniform?
-    
+    origin = parse_tuple3(data.Origin_of_Region)
+    dom = data.Domain
+    z_grid = data.Z_grid
+    z_type_str = String(z_grid.type)
+    z_type = if z_type_str == "uniform"
+        :uniform
+    elseif z_type_str == "non-uniform"
+        :non_uniform
+    else
+        error("Unknown Z_grid.type: $(z_type_str)")
+    end
+    z_file = haskey(z_grid, :file) ? String(z_grid.file) : ""
+    Lz = (z_type == :uniform) ? Float64(z_grid.Lz) : 0.0
+    if z_type == :uniform && Lz <= 0.0
+        error("Z_grid.Lz must be > 0 for uniform grid.")
+    elseif z_type == :non_uniform && isempty(z_file)
+        error("Z_grid.file is required for non-uniform grid.")
+    end
     grid_config = GridConfig(
-        Int(g.Nx), Int(g.Ny), Int(g.Nz),
-        Float64(g.Lx), Float64(g.Ly), Lz,
+        Int(dom.Nx), Int(dom.Ny), Int(dom.Nz),
+        Float64(dom.Lx), Float64(dom.Ly), Lz,
         origin, z_type, z_file
     )
 
     # --- Time & Stability ---
-    courant_number = Float64(data.Time.Co)
-    time_scheme = Symbol(get(data.Time, :scheme, "Euler"))
+    courant_number = Float64(data.Courant_number)
+    time_scheme_str = String(get(data, :Time_Integration_Scheme, "Euler"))
+    time_scheme = Symbol(time_scheme_str)
+    if !(time_scheme in (:Euler, :RK2, :RK4))
+        error("Unknown Time_Integration_Scheme: $(time_scheme_str)")
+    end
 
     # --- Intervals ---
     intv = data.Intervals
-    avg_start_time = Float64(intv.Start_time_for_averaging)
+    avg_start_time = Float64(get(data, :Start_time_for_averaging, 0.0))
     avg_start_time_nd = avg_start_time / T0
-    
     intervals = IntervalConfig(
         Int(intv.display),
         Int(intv.history),
@@ -151,7 +189,7 @@ function load_parameters(filepath::String)::SimulationParams
     end
 
     # --- Poisson ---
-    p = data.Poisson
+    p = data.Poisson_parameter
     p_solver = Symbol(get(p, :solver, "RedBlackSOR"))
     solver_type = if p_solver == :CG; CG
                   elseif p_solver == :BiCGSTAB; BiCGSTAB
@@ -163,14 +201,14 @@ function load_parameters(filepath::String)::SimulationParams
 
     poisson_config = PoissonConfig(
         solver_type,
-        Float64(p.omega),
-        Float64(p.tol),
-        Int(p.max_iter),
+        Float64(p.coef_acceleration),
+        Float64(p.convergence_criteria),
+        Int(p.Iteration_max),
         action_type
     )
 
     # --- Initial Condition ---
-    ic = get(data, :InitialCondition, nothing)
+    ic = get(data, :Initial_Condition, nothing)
     initial_condition = if isnothing(ic)
         InitialCondition((0.0, 0.0, 0.0), 0.0)
     else
@@ -178,6 +216,14 @@ function load_parameters(filepath::String)::SimulationParams
             parse_tuple3(get(ic, :velocity, [0.0, 0.0, 0.0])),
             Float64(get(ic, :pressure, 0.0))
         )
+    end
+
+    restart_file = ""
+    if haskey(data, :Restart)
+        restart_file = String(get(data.Restart, :file, ""))
+    end
+    if start_mode == :restart && isempty(restart_file)
+        error("Restart.file must be set when start=\"restart\".")
     end
 
     # 安定条件の簡易チェック (D < 0.5)
@@ -188,7 +234,8 @@ function load_parameters(filepath::String)::SimulationParams
         dry_run, start_mode, max_step, dim_params,
         grid_config, courant_number, intervals,
         viz_config, poisson_config, time_scheme,
-        output_dimensional, initial_condition, restart_file
+        smagorinsky_constant, div_max_threshold,
+        initial_condition, restart_file
     )
 end
 
@@ -209,78 +256,91 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     data = JSON3.read(json_str)
 
     function parse_bc(bc_data)
-        t = Symbol(bc_data.type)
-        val_dim = haskey(bc_data, :value) ? parse_tuple3(bc_data.value) : (0.0, 0.0, 0.0)
-        val = val_dim ./ U0
-        
-        bc_type = if t == :Dirichlet; Dirichlet
-                  elseif t == :Neumann; Neumann
-                  elseif t == :Outflow; Outflow
-                  elseif t == :Periodic; Periodic
-                  else; error("Unknown BC type: $t")
+        vel_str = lowercase(String(bc_data.velocity))
+        bc_type = if vel_str == "dirichlet"; Dirichlet
+                  elseif vel_str == "neumann"; Neumann
+                  elseif vel_str == "outflow"; Outflow
+                  elseif vel_str == "periodic"; Periodic
+                  else; error("Unknown velocity BC type: $(vel_str)")
                   end
+        val = (0.0, 0.0, 0.0)
+        if bc_type == Dirichlet
+            if !haskey(bc_data, :value)
+                error("Dirichlet boundary requires value.")
+            end
+            val_dim = parse_tuple3(bc_data.value)
+            val = val_dim ./ U0
+        end
         return ExternalBC(bc_type, val)
     end
 
-    x_min = parse_bc(data.faces.x_min)
-    x_max = parse_bc(data.faces.x_max)
-    y_min = parse_bc(data.faces.y_min)
-    y_max = parse_bc(data.faces.y_max)
-    z_min = parse_bc(data.faces.z_min)
-    z_max = parse_bc(data.faces.z_max)
+    x_min = parse_bc(data.external_boundaries.x_min)
+    x_max = parse_bc(data.external_boundaries.x_max)
+    y_min = parse_bc(data.external_boundaries.y_min)
+    y_max = parse_bc(data.external_boundaries.y_max)
+    z_min = parse_bc(data.external_boundaries.z_min)
+    z_max = parse_bc(data.external_boundaries.z_max)
 
     inlets = InletOutlet[]
-    if haskey(data, :Inlets)
-        for item in data.Inlets
+    if haskey(data, :inlets)
+        for item in data.inlets
+            shape = Symbol(item.type)
+            if shape != :rectangular
+                error("Unsupported inlet type: $(shape)")
+            end
             pos = parse_tuple3(item.position) ./ L0
             sz = parse_tuple2(item.size) ./ L0
             vel = parse_tuple3(item.velocity) ./ U0
             push!(inlets, InletOutlet(
-                Symbol(item.shape),
+                shape,
                 pos,
                 sz,
                 parse_tuple3_int(item.normal),
-                Dirichlet, 
+                Dirichlet,
                 vel
             ))
         end
     end
 
     outlets = InletOutlet[]
-    if haskey(data, :Outlets)
-        for item in data.Outlets
-            cond = Symbol(get(item, :condition, "Outflow"))
-            bctype = (cond == :Dirichlet) ? Dirichlet : Outflow
+    if haskey(data, :outlets)
+        for item in data.outlets
+            shape = Symbol(item.type)
+            if shape != :rectangular
+                error("Unsupported outlet type: $(shape)")
+            end
+            cond_str = lowercase(String(get(item, :condition, "outflow")))
+            bctype = (cond_str == "dirichlet") ? Dirichlet : Outflow
             pos = parse_tuple3(item.position) ./ L0
-            
-             sz_dim = if Symbol(item.shape) == :cylindrical
-                 (Float64(get(item, :radius, 0.0)), 0.0)
-             else
-                 parse_tuple2(item.size)
-             end
-             sz = sz_dim ./ L0
-
+            sz = parse_tuple2(item.size) ./ L0
+            vel = (0.0, 0.0, 0.0)
+            if bctype == Dirichlet
+                if !haskey(item, :velocity)
+                    error("Outlet dirichlet requires velocity.")
+                end
+                vel = parse_tuple3(item.velocity) ./ U0
+            end
             push!(outlets, InletOutlet(
-                Symbol(item.shape),
+                shape,
                 pos,
                 sz,
                 parse_tuple3_int(item.normal),
                 bctype,
-                (0.0,0.0,0.0)
+                vel
             ))
         end
     end
 
     internal_bcs = InternalBoundary[]
-    if haskey(data, :InternalBoundaries)
-        for item in data.InternalBoundaries
+    if haskey(data, :internal_boundaries)
+        for item in data.internal_boundaries
             shape = Symbol(item.type)
             norm = parse_tuple3_int(item.normal)
             vel = parse_tuple3(item.velocity) ./ U0
-            
             if shape == :rectangular
-                rmin = parse_tuple3(item.region_min) ./ L0
-                rmax = parse_tuple3(item.region_max) ./ L0
+                region = item.region
+                rmin = parse_tuple3(region.min) ./ L0
+                rmax = parse_tuple3(region.max) ./ L0
                 push!(internal_bcs, InternalBoundary(
                     shape, rmin, rmax,
                     (0.0,0.0,0.0), 0.0, 0.0, :z,
@@ -292,10 +352,12 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                 h = Float64(item.height) / L0
                 ax = Symbol(item.axis)
                 push!(internal_bcs, InternalBoundary(
-                    shape, (0.0,0.0,0.0), (0.0,0.0,0.0), 
+                    shape, (0.0,0.0,0.0), (0.0,0.0,0.0),
                     cent, rad, h, ax,
                     norm, vel
                 ))
+            else
+                error("Unknown internal boundary type: $(shape)")
             end
         end
     end

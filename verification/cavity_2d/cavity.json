@@ -1,39 +1,35 @@
 {
-  "dry_run": false,
+  "dry_run": "no",
   "start": "initial",
-  "max_step": 2000,
-  "restart_file": "",
-  "output_dimensional": true,
-  "Dimensions": {
-    "L0": 1.0,
-    "U0": 1.0,
-    "nu": 0.01
-  },
-  "Grid": {
-    "Nx": 32,
-    "Ny": 4,
-    "Nz": 32,
+  "Max_step": 2000,
+  "Reference_Length": 1.0,
+  "Reference_Velocity": 1.0,
+  "Kinematic_Viscosity": 0.01,
+  "Smagorinsky_Constant": 0.2,
+  "Origin_of_Region": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "Domain": {
     "Lx": 1.0,
     "Ly": 0.125,
+    "Nx": 32,
+    "Ny": 4,
+    "Nz": 32
+  },
+  "Z_grid": {
+    "type": "uniform",
     "Lz": 1.0,
-    "origin": [
-      0.0,
-      0.0,
-      0.0
-    ],
-    "z_type": "uniform"
+    "file": ""
   },
-  "Time": {
-    "Co": 0.2,
-    "scheme": "RK2"
-  },
+  "Courant_number": 0.2,
   "Intervals": {
     "display": 100,
     "history": 10,
     "Instantaneous_file": 500,
     "averaged_file": 1000,
-    "checkpoint": 1000,
-    "Start_time_for_averaging": 10.0
+    "checkpoint": 1000
   },
   "Visualization": {
     "interval": 200,
@@ -44,24 +40,30 @@
       "pressure"
     ],
     "output_format": "png",
-    "output_dir": "verification/cavity_2d/viz",
+    "output_dir": "viz",
     "vector_enabled": true,
     "vector_skip": 2,
     "text_output": false
   },
-  "Poisson": {
+  "Poisson_parameter": {
     "solver": "RedBlackSOR",
-    "omega": 1.7,
-    "tol": 1e-5,
-    "max_iter": 1000,
+    "coef_acceleration": 1.7,
+    "convergence_criteria": 1.0e-5,
+    "Iteration_max": 1000,
     "on_divergence": "Abort"
   },
-  "InitialCondition": {
+  "Start_time_for_averaging": 10.0,
+  "Time_Integration_Scheme": "RK2",
+  "divMax_threshold": 10,
+  "Initial_Condition": {
     "velocity": [
       0.0,
       0.0,
       0.0
     ],
     "pressure": 0.0
+  },
+  "Restart": {
+    "file": ""
   }
 }

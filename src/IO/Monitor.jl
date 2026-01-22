@@ -95,17 +95,18 @@ end
 
 function log_step!(
     data::MonitorData,
-    config::MonitorConfig,
-    history_io::IO
+    config::MonitorConfig;
+    console_io::Union{IO, Nothing}=stdout,
+    history_io::Union{IO, Nothing}=nothing
 )
-    if data.step % config.console_interval == 0 || data.step == 1
-        @printf("Step %d Time %.4e Umax %.3e Div %.3e dU %.3e ItrP %d Pres %.3e\n",
-            data.step, data.time, data.u_max, data.div_max, data.dU, data.pressure_itr, data.pressure_residual)
+    step_width = max(config.step_digits, 4)
+    if console_io !== nothing && (data.step % config.console_interval == 0 || data.step == 1)
+        @printf(console_io, "Step %*d Time %11.4e Umax %.3e Div %.3e dU %.3e ItrP %4d Pres %.3e\n",
+            step_width, data.step, data.time, data.u_max, data.div_max, data.dU, data.pressure_itr, data.pressure_residual)
     end
-    
-    if data.step % config.history_interval == 0 || data.step == 1
+
+    if history_io !== nothing && (data.step % config.history_interval == 0 || data.step == 1)
         # Step: Left aligned, padded to max digits
-        step_width = max(config.step_digits, 4)
         s_step = rpad(string(data.step), step_width)
         print(history_io, s_step, " ")
         

@@ -37,7 +37,6 @@ function write_sph_header(
     grid::GridData,
     step::Int,
     time::Float64,
-    is_dim::Bool,
     dim_params::DimensionParams
 )
     # Rec 1: svType, dType
@@ -61,7 +60,7 @@ function write_sph_header(
     
     # Rec 3: Time, Step, Org, Pitch
     # Time (Float32)
-    t_val = Float32(time * (is_dim ? 1.0 : dim_params.T0))
+    t_val = Float32(time * dim_params.T0)
     stp = Int32(step)
     
     # Origin and Pitch
@@ -87,7 +86,6 @@ function write_sph_vector(
     grid::GridData,
     step::Int,
     time::Float64,
-    is_dimensional::Bool,
     dim_params::DimensionParams
 )
     # Crop to internal domain
@@ -95,14 +93,12 @@ function write_sph_vector(
     mx, my, mz = grid.mx, grid.my, grid.mz
     nx, ny, nz = mx-4, my-4, mz-4
     
-    U_scale = is_dimensional ? 1.0 : dim_params.U0
-    
-    u_out = Float32.(u[3:mx-2, 3:my-2, 3:mz-2] .* U_scale)
-    v_out = Float32.(v[3:mx-2, 3:my-2, 3:mz-2] .* U_scale)
-    w_out = Float32.(w[3:mx-2, 3:my-2, 3:mz-2] .* U_scale)
+    u_out = Float32.(u[3:mx-2, 3:my-2, 3:mz-2] .* dim_params.U0)
+    v_out = Float32.(v[3:mx-2, 3:my-2, 3:mz-2] .* dim_params.U0)
+    w_out = Float32.(w[3:mx-2, 3:my-2, 3:mz-2] .* dim_params.U0)
     
     open(filepath, "w") do io
-        write_sph_header(io, Int32(2), Int32(1), grid, step, time, is_dimensional, dim_params)
+        write_sph_header(io, Int32(2), Int32(1), grid, step, time, dim_params)
         
         # Interleave u, v, w? Or u block, v block, w block?
         # V-Isio Vector standard: u, v, w interleaved (u1, v1, w1, u2, ...) ?
@@ -139,18 +135,15 @@ function write_sph_scalar(
     grid::GridData,
     step::Int,
     time::Float64,
-    is_dimensional::Bool,
     dim_params::DimensionParams
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     nx, ny, nz = mx-4, my-4, mz-4
     
-    P_scale = is_dimensional ? 1.0 : dim_params.U0^2 # Approx
-    
-    p_out = Float32.(p[3:mx-2, 3:my-2, 3:mz-2] .* P_scale)
+    p_out = Float32.(p[3:mx-2, 3:my-2, 3:mz-2] .* (dim_params.U0^2))
     
     open(filepath, "w") do io
-        write_sph_header(io, Int32(1), Int32(1), grid, step, time, is_dimensional, dim_params)
+        write_sph_header(io, Int32(1), Int32(1), grid, step, time, dim_params)
         write_array_record(io, vec(p_out))
     end
 end

@@ -111,6 +111,88 @@ function compute_face_average_velocity(
     return (count > 0) ? sum_vel / count : 0.0
 end
 
+function compute_region_average_velocity(
+    u::Array{Float64, 3},
+    v::Array{Float64, 3},
+    w::Array{Float64, 3},
+    grid::GridData,
+    face::Symbol,
+    region_check::Function
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    sum_vel = 0.0
+    count = 0
+    if face == :x_min || face == :x_max
+        i = (face == :x_min) ? 3 : mx-2
+        for k in 3:mz-2, j in 3:my-2
+            if region_check(i, j, k)
+                sum_vel += u[i, j, k]
+                count += 1
+            end
+        end
+    elseif face == :y_min || face == :y_max
+        j = (face == :y_min) ? 3 : my-2
+        for k in 3:mz-2, i in 3:mx-2
+            if region_check(i, j, k)
+                sum_vel += v[i, j, k]
+                count += 1
+            end
+        end
+    elseif face == :z_min || face == :z_max
+        k = (face == :z_min) ? 3 : mz-2
+        for j in 3:my-2, i in 3:mx-2
+            if region_check(i, j, k)
+                sum_vel += w[i, j, k]
+                count += 1
+            end
+        end
+    end
+    return (count > 0) ? sum_vel / count : 0.0
+end
+
+@inline function face_from_normal(normal::NTuple{3, Int})::Symbol
+    if normal == (1, 0, 0)
+        return :x_max
+    elseif normal == (-1, 0, 0)
+        return :x_min
+    elseif normal == (0, 1, 0)
+        return :y_max
+    elseif normal == (0, -1, 0)
+        return :y_min
+    elseif normal == (0, 0, 1)
+        return :z_max
+    elseif normal == (0, 0, -1)
+        return :z_min
+    end
+    error("normal must be axis-aligned: $(normal)")
+end
+
+@inline function is_in_rectangular_patch(
+    x::Float64,
+    y::Float64,
+    z::Float64,
+    position::NTuple{3, Float64},
+    size::NTuple{2, Float64},
+    normal::NTuple{3, Int},
+    grid::GridData,
+    k::Int
+)::Bool
+    if normal[1] != 0
+        return abs(x - position[1]) <= grid.dx &&
+               abs(y - position[2]) <= size[1] * 0.5 &&
+               abs(z - position[3]) <= size[2] * 0.5
+    elseif normal[2] != 0
+        return abs(y - position[2]) <= grid.dy &&
+               abs(x - position[1]) <= size[1] * 0.5 &&
+               abs(z - position[3]) <= size[2] * 0.5
+    elseif normal[3] != 0
+        return abs(z - position[3]) <= grid.dz[k] &&
+               abs(x - position[1]) <= size[1] * 0.5 &&
+               abs(y - position[2]) <= size[2] * 0.5
+    end
+    return false
+end
+
 """
     apply_outflow!(phi, grid, face, dt, Uc)
 
@@ -196,6 +278,119 @@ function apply_outflow!(
             phi[i, j, 1] = phi[i, j, 2]
         end
     end
+end
+
+function apply_outflow_region!(
+    phi::Array{Float64, 3},
+    grid::GridData,
+    face::Symbol,
+    dt::Float64,
+    Uc::Float64,
+    region_check::Function
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    if face == :x_max
+        dx = grid.dx
+        c = Uc * dt / dx
+        i_inner = mx - 2
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            if region_check(i_inner, j, k)
+                phi[mx-1, j, k] = phi[mx-1, j, k] - c * (phi[mx-1, j, k] - phi[mx-2, j, k])
+                phi[mx, j, k] = phi[mx-1, j, k]
+            end
+        end
+    elseif face == :x_min
+        dx = grid.dx
+        c = Uc * dt / dx
+        i_inner = 3
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            if region_check(i_inner, j, k)
+                phi[2, j, k] = phi[2, j, k] - c * (phi[3, j, k] - phi[2, j, k])
+                phi[1, j, k] = phi[2, j, k]
+            end
+        end
+    elseif face == :y_max
+        dy = grid.dy
+        c = Uc * dt / dy
+        j_inner = my - 2
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            if region_check(i, j_inner, k)
+                phi[i, my-1, k] = phi[i, my-1, k] - c * (phi[i, my-1, k] - phi[i, my-2, k])
+                phi[i, my, k] = phi[i, my-1, k]
+            end
+        end
+    elseif face == :y_min
+        dy = grid.dy
+        c = Uc * dt / dy
+        j_inner = 3
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            if region_check(i, j_inner, k)
+                phi[i, 2, k] = phi[i, 2, k] - c * (phi[i, 3, k] - phi[i, 2, k])
+                phi[i, 1, k] = phi[i, 2, k]
+            end
+        end
+    elseif face == :z_max
+        dz = grid.dz[mz-2]
+        c = Uc * dt / dz
+        k_inner = mz - 2
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            if region_check(i, j, k_inner)
+                phi[i, j, mz-1] = phi[i, j, mz-1] - c * (phi[i, j, mz-1] - phi[i, j, mz-2])
+                phi[i, j, mz] = phi[i, j, mz-1]
+            end
+        end
+    elseif face == :z_min
+        dz = grid.dz[3]
+        c = Uc * dt / dz
+        k_inner = 3
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            if region_check(i, j, k_inner)
+                phi[i, j, 2] = phi[i, j, 2] - c * (phi[i, j, 3] - phi[i, j, 2])
+                phi[i, j, 1] = phi[i, j, 2]
+            end
+        end
+    end
+end
+
+@inline function in_internal_cylinder(
+    x::Float64,
+    y::Float64,
+    z::Float64,
+    center::NTuple{3, Float64},
+    radius::Float64,
+    height::Float64,
+    axis::Symbol
+)::Bool
+    dx, dy, dz = x - center[1], y - center[2], z - center[3]
+    r2 = 0.0
+    h_ok = false
+    if axis == :z
+        r2 = dx^2 + dy^2
+        h_ok = 0.0 <= dz <= height
+    elseif axis == :y
+        r2 = dx^2 + dz^2
+        h_ok = 0.0 <= dy <= height
+    elseif axis == :x
+        r2 = dy^2 + dz^2
+        h_ok = 0.0 <= dx <= height
+    end
+    return h_ok && (r2 <= radius^2)
+end
+
+@inline function is_in_internal_boundary(
+    ib::InternalBoundary,
+    x::Float64,
+    y::Float64,
+    z::Float64
+)::Bool
+    if ib.type == :rectangular
+        return (ib.region_min[1] <= x <= ib.region_max[1]) &&
+               (ib.region_min[2] <= y <= ib.region_max[2]) &&
+               (ib.region_min[3] <= z <= ib.region_max[3])
+    elseif ib.type == :cylindrical
+        return in_internal_cylinder(x, y, z, ib.center, ib.radius, ib.height, ib.axis)
+    end
+    return false
 end
 
 """
@@ -406,6 +601,16 @@ function apply_velocity_bcs!(
     y_periodic = bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
     x_periodic = bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
     z_periodic = bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+
+    if (bc_set.y_min.velocity_type == Periodic) != (bc_set.y_max.velocity_type == Periodic)
+        error("Periodic boundary requires both y_min and y_max to be periodic.")
+    end
+    if (bc_set.x_min.velocity_type == Periodic) != (bc_set.x_max.velocity_type == Periodic)
+        error("Periodic boundary requires both x_min and x_max to be periodic.")
+    end
+    if (bc_set.z_min.velocity_type == Periodic) != (bc_set.z_max.velocity_type == Periodic)
+        error("Periodic boundary requires both z_min and z_max to be periodic.")
+    end
     
     if y_periodic
         apply_periodic_velocity!(u, v, w, grid, :y)
@@ -430,39 +635,69 @@ function apply_velocity_bcs!(
     
     # 2. Inlets
     for inlet in bc_set.inlets
-        # セルセンターまたはフェイスで座標判定
         for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
             x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
-            
-            in_range = false
-            if inlet.type == :rectangular
-                if inlet.normal == (1, 0, 0) || inlet.normal == (-1, 0, 0)
-                    if abs(x - inlet.position[1]) < grid.dx &&
-                       abs(y - inlet.position[2]) <= inlet.size[1]*0.5 &&
-                       abs(z - inlet.position[3]) <= inlet.size[2]*0.5
-                        in_range = true
-                    end
-                elseif inlet.normal == (0, 0, 1) || inlet.normal == (0, 0, -1)
-                    if abs(z - inlet.position[3]) < grid.dz[k] &&
-                       abs(x - inlet.position[1]) <= inlet.size[1]*0.5 &&
-                       abs(y - inlet.position[2]) <= inlet.size[2]*0.5
-                        in_range = true
-                    end
-                end
+            if inlet.type != :rectangular
+                error("Unsupported inlet type: $(inlet.type)")
             end
-            
-            # マスクを確認し、固体領域には適用しない（壁として扱う）
-            if in_range && mask[i, j, k] > 0.5
+            in_range = is_in_rectangular_patch(
+                x, y, z,
+                inlet.position,
+                inlet.size,
+                inlet.normal,
+                grid,
+                k
+            )
+            if in_range
                 u[i, j, k] = inlet.velocity[1]
                 v[i, j, k] = inlet.velocity[2]
                 w[i, j, k] = inlet.velocity[3]
             end
         end
     end
+
+    # 3. Outlets
+    for outlet in bc_set.outlets
+        if outlet.type != :rectangular
+            error("Unsupported outlet type: $(outlet.type)")
+        end
+        face = face_from_normal(outlet.normal)
+        region_check = (i, j, k) -> is_in_rectangular_patch(
+            grid.x[i],
+            grid.y[j],
+            grid.z_center[k],
+            outlet.position,
+            outlet.size,
+            outlet.normal,
+            grid,
+            k
+        )
+        if outlet.condition == Dirichlet
+            for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+                if region_check(i, j, k)
+                    u[i, j, k] = outlet.velocity[1]
+                    v[i, j, k] = outlet.velocity[2]
+                    w[i, j, k] = outlet.velocity[3]
+                end
+            end
+        elseif outlet.condition == Outflow
+            Uc = compute_region_average_velocity(u, v, w, grid, face, region_check)
+            apply_outflow_region!(u, grid, face, dt, Uc, region_check)
+            apply_outflow_region!(v, grid, face, dt, Uc, region_check)
+            apply_outflow_region!(w, grid, face, dt, Uc, region_check)
+        end
+    end
     
-    # 3. Internal Boundaries
+    # 4. Internal Boundaries
     for ib in bc_set.internal_boundaries
-         # TODO: Internal Dirichlet/Neumann logic
+        for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+            x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
+            if is_in_internal_boundary(ib, x, y, z)
+                u[i, j, k] = ib.velocity[1]
+                v[i, j, k] = ib.velocity[2]
+                w[i, j, k] = ib.velocity[3]
+            end
+        end
     end
 end
 
@@ -475,9 +710,64 @@ function apply_boundary_conditions!(
 )
     # Apply Velocity BCs
     apply_velocity_bcs!(buffers.u, buffers.v, buffers.w, grid, buffers.mask, bc_set, dt)
-    
-    # Apply Periodic Pressure BCs
-    apply_periodic_pressure!(buffers.p, grid, bc_set)
+
+    # Apply Pressure BCs (Neumann / Periodic)
+    apply_pressure_bcs!(buffers.p, grid, buffers.mask, bc_set)
+    apply_internal_pressure_bcs!(buffers.p, grid, bc_set)
+end
+
+function apply_pressure_bcs!(
+    p::Array{Float64, 3},
+    grid::GridData,
+    mask::Array{Float64, 3},
+    bc_set::BoundaryConditionSet
+)
+    # Y-direction
+    if bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :y)
+    else
+        set_boundary_value!(p, grid, mask, :y_min, 0.0, Neumann)
+        set_boundary_value!(p, grid, mask, :y_max, 0.0, Neumann)
+    end
+    # X-direction
+    if bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :x)
+    else
+        set_boundary_value!(p, grid, mask, :x_min, 0.0, Neumann)
+        set_boundary_value!(p, grid, mask, :x_max, 0.0, Neumann)
+    end
+    # Z-direction
+    if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :z)
+    else
+        set_boundary_value!(p, grid, mask, :z_min, 0.0, Neumann)
+        set_boundary_value!(p, grid, mask, :z_max, 0.0, Neumann)
+    end
+end
+
+function apply_internal_pressure_bcs!(
+    p::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    for ib in bc_set.internal_boundaries
+        ni, nj, nk = ib.normal
+        di = (ni != 0) ? -ni : 0
+        dj = (nj != 0) ? -nj : 0
+        dk = (nk != 0) ? -nk : 0
+        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+            x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
+            if is_in_internal_boundary(ib, x, y, z)
+                src_i = i + di
+                src_j = j + dj
+                src_k = k + dk
+                if 1 <= src_i <= mx && 1 <= src_j <= my && 1 <= src_k <= mz
+                    p[i, j, k] = p[src_i, src_j, src_k]
+                end
+            end
+        end
+    end
 end
 
 """

@@ -112,6 +112,9 @@ function run_simulation(param_file::String)
     @inbounds @. buffers.v *= buffers.mask
     @inbounds @. buffers.w *= buffers.mask
     @inbounds @. buffers.p *= buffers.mask    
+    if isfile(geo_path)
+        apply_object_velocity!(buffers.u, buffers.v, buffers.w, objects, grid)
+    end
     start_step = 0
     start_time = 0.0
     if sim_params.start == :restart
@@ -123,7 +126,7 @@ function run_simulation(param_file::String)
     monitor_config = MonitorConfig(
         sim_params.intervals.display,
         sim_params.intervals.history,
-        1e5,
+        sim_params.div_max_threshold,
         ndigits(sim_params.max_step) 
     )
     
@@ -160,7 +163,7 @@ function run_simulation(param_file::String)
         
         # Advance one time step
         pitr, pres = advance!(
-            buffers, grid, bc_set, t_conf, sim_params.poisson, 0.1, nu_lam, dt_fixed, "thread",
+            buffers, grid, bc_set, t_conf, sim_params.poisson, sim_params.smagorinsky_constant, nu_lam, dt_fixed, "thread",
             rk_buffers=rk_buffers
         )
         time += dt_fixed
@@ -184,9 +187,8 @@ function run_simulation(param_file::String)
         w_prev .= buffers.w
         
         mon_data = MonitorData(step, time, u_max, div, dU, pitr, pres)
-        log_step!(mon_data, monitor_config, stdout)
         open(joinpath(out_dir, "history.txt"), "a") do io
-            log_step!(mon_data, monitor_config, io)
+            log_step!(mon_data, monitor_config; console_io=stdout, history_io=io)
         end
         
         if check_divergence(div, monitor_config.div_threshold)
@@ -196,14 +198,14 @@ function run_simulation(param_file::String)
         
         if sim_params.intervals.instantaneous > 0 && step % sim_params.intervals.instantaneous == 0
             fname = generate_sph_filename(joinpath(out_dir, "vel"), step)
-            write_sph_vector(fname, buffers.u, buffers.v, buffers.w, grid, step, time, sim_params.output_dimensional, dim_params)
+            write_sph_vector(fname, buffers.u, buffers.v, buffers.w, grid, step, time, dim_params)
             fname_p = generate_sph_filename(joinpath(out_dir, "prs"), step)
-            write_sph_scalar(fname_p, buffers.p, grid, step, time, sim_params.output_dimensional, dim_params)
+            write_sph_scalar(fname_p, buffers.p, grid, step, time, dim_params)
         end
         
         if sim_params.intervals.checkpoint > 0 && step % sim_params.intervals.checkpoint == 0
             fname = generate_checkpoint_filename(step)
-            write_checkpoint(joinpath(out_dir, fname), buffers, grid, step, time, false, dim_params)
+            write_checkpoint(joinpath(out_dir, fname), buffers, grid, step, time, dim_params)
         end
         
         if sim_params.visualization.interval > 0 && step % sim_params.visualization.interval == 0

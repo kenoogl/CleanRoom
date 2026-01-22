@@ -51,9 +51,7 @@ function Visualization.render_slice(
     var_u = buffers.u .* U0
     var_v = buffers.v .* U0
     var_w = buffers.w .* U0
-    var_p = buffers.p .* (U0^2 * 1.225) # Approx Pa if Rho=1.225? Or just dimensionless p * U0^2 if density is normalized
-    # Let's assume just p * U0^2 for now or "Pressure [Pa]" if rho included. 
-    # Spec says "output_dimensional".
+    var_p = buffers.p .* (U0^2)
     
     # Magnitude
     var_mag = sqrt.(var_u.^2 .+ var_v.^2 .+ var_w.^2)
@@ -90,8 +88,8 @@ function Visualization.render_slice(
         if config.vector_enabled
              # Downsample for arrows
              skip = config.vector_skip
-             arrows!(ax, X[1:skip:end], Y[1:skip:end], data_u[1:skip:end, 1:skip:end], data_v[1:skip:end, 1:skip:end], 
-                     arrowsize=10, lengthscale=0.05 / U0, color=:white)
+             arrows2d!(ax, X[1:skip:end], Y[1:skip:end], data_u[1:skip:end, 1:skip:end], data_v[1:skip:end, 1:skip:end],
+                       tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
         end
         
     elseif config.plane == :xz
@@ -115,8 +113,8 @@ function Visualization.render_slice(
         
         if config.vector_enabled
              skip = config.vector_skip
-             arrows!(ax, X[1:skip:end], Z[1:skip:end], data_u[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end], 
-                     arrowsize=10, lengthscale=0.05 / U0, color=:white)
+             arrows2d!(ax, X[1:skip:end], Z[1:skip:end], data_u[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end],
+                       tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
         end
         
     elseif config.plane == :yz
@@ -140,8 +138,8 @@ function Visualization.render_slice(
         
         if config.vector_enabled
              skip = config.vector_skip
-             arrows!(ax, Y[1:skip:end], Z[1:skip:end], data_v[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end], 
-                     arrowsize=10, lengthscale=0.05 / U0, color=:white)
+             arrows2d!(ax, Y[1:skip:end], Z[1:skip:end], data_v[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end],
+                       tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
         end
     end
     

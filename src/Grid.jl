@@ -56,25 +56,57 @@ function read_z_grid_file(filepath::String, Nz::Int, origin_z::Float64)::Vector{
     end
     
     lines = readlines(filepath)
-    coords = Float64[]
+    coords = Dict{Int, Float64}()
+    expected = Nz + 5
+    count = nothing
     for line in lines
         line = split(line, "#")[1]
         line = strip(line)
         if isempty(line)
             continue
         end
-        try
-            push!(coords, parse(Float64, line))
-        catch
-            error("Invalid number in grid file: $line")
+        if isnothing(count)
+            try
+                count = parse(Int, line)
+            catch
+                error("Invalid grid count in file: $line")
+            end
+            continue
         end
+        parts = split(line)
+        if length(parts) < 2
+            error("Invalid grid line: $line")
+        end
+        idx = try
+            parse(Int, parts[1])
+        catch
+            error("Invalid grid index: $line")
+        end
+        val = try
+            parse(Float64, parts[2])
+        catch
+            error("Invalid grid coordinate: $line")
+        end
+        coords[idx] = val
     end
 
-    if length(coords) != Nz + 5
-        error("Grid points mismatch: expected $(Nz+5), got $(length(coords))")
+    if isnothing(count)
+        error("Grid file is missing point count.")
+    end
+    if count != expected
+        error("Grid points mismatch: expected $(expected), got $(count)")
+    end
+    if length(coords) != expected
+        error("Grid points count mismatch: expected $(expected), got $(length(coords))")
+    end
+    for idx in 1:expected
+        if !haskey(coords, idx)
+            error("Missing grid index: $(idx)")
+        end
     end
     
-    return coords .+ origin_z
+    z_vals = [coords[i] for i in 1:expected]
+    return z_vals .+ origin_z
 end
 
 """

@@ -1,62 +1,58 @@
 {
-  "dry_run": false,
+  "dry_run": "no",
   "start": "initial",
-  "max_step": 1000,
-  "output_dimensional": true,
-  "Dimensions": {
-    "L0": 1.0,
-    "U0": 5.0,
-    "nu": 1.5e-5
-  },
-  "Grid": {
-    "Nx": 50,
-    "Ny": 50,
-    "Nz": 50,
+  "Max_step": 1000,
+  "Reference_Length": 1.0,
+  "Reference_Velocity": 5.0,
+  "Kinematic_Viscosity": 1.5e-5,
+  "Smagorinsky_Constant": 0.2,
+  "Origin_of_Region": [-0.5, -0.5, 0.0],
+  "Domain": {
     "Lx": 5.0,
     "Ly": 1.0,
+    "Nx": 50,
+    "Ny": 50,
+    "Nz": 50
+  },
+  "Z_grid": {
+    "type": "uniform",
     "Lz": 1.0,
-    "origin": [
-      -0.5,
-      -0.5,
-      0.0
-    ],
-    "z_type": "uniform"
+    "file": ""
   },
-  "Time": {
-    "Co": 0.2,
-    "scheme": "RK2"
-  },
+  "Courant_number": 0.2,
   "Intervals": {
     "display": 10,
     "history": 10,
     "Instantaneous_file": 100,
-    "checkpoint": 500,
-    "Start_time_for_averaging": 0.0
-  },
-  "Poisson": {
-    "solver": "RedBlackSOR",
-    "omega": 1.2,
-    "tol": 1e-4,
-    "max_iter": 500,
-    "on_divergence": "WarnContinue"
-  },
-  "InitialCondition": {
-    "velocity": [
-      5.0,
-      0.0,
-      0.0
-    ],
-    "pressure": 0.0
+    "averaged_file": 0,
+    "checkpoint": 500
   },
   "Visualization": {
     "interval": 100,
     "plane": "xz",
     "plane_index": 25,
-    "variables": [
-      "velocity",
-      "pressure"
-    ],
+    "variables": ["velocity", "pressure"],
     "output_format": "png",
-    "output_dir": "viz"
+    "output_dir": "viz",
+    "vector_enabled": false,
+    "vector_skip": 1,
+    "text_output": false
+  },
+  "Poisson_parameter": {
+    "solver": "CG",
+    "coef_acceleration": 1.2,
+    "convergence_criteria": 1.0e-4,
+    "Iteration_max": 500,
+    "on_divergence": "WarnContinue"
+  },
+  "Start_time_for_averaging": 0.0,
+  "Time_Integration_Scheme": "RK2",
+  "divMax_threshold": 1.0e-3,
+  "Initial_Condition": {
+    "velocity": [5.0, 0.0, 0.0],
+    "pressure": 0.0
+  },
+  "Restart": {
+    "file": ""
   }
 }

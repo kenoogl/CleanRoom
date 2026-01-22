@@ -1144,7 +1144,8 @@ struct SimulationParams
     visualization::VizConfig
     poisson::PoissonConfig
     time_scheme::Symbol   # :Euler, :RK2, :RK4
-    output_dimensional::Bool
+    smagorinsky_constant::Float64
+    div_max_threshold::Float64
     initial_condition::InitialCondition
     restart_file::String
 end
@@ -1171,7 +1172,7 @@ end
 **Responsibilities & Constraints**
 - リトルエンディアン、単精度Float32
 - Fortran unformatted互換レコードマーカー
-- 有次元/無次元変換
+- 有次元量として出力
 - **原点座標は最初のセルの左端（フェイス位置）を格納**
   - セルセンター座標: `x_center[i] = origin + (i - 0.5) * pitch`
 
@@ -1207,7 +1208,6 @@ function write_sph_vector(
     grid::GridData,
     step::Int,
     time::Float64,
-    is_dimensional::Bool,
     dim_params::DimensionParams
 )
     # ベクトルSPH出力（svType=2）
@@ -1219,7 +1219,6 @@ function write_sph_scalar(
     grid::GridData,
     step::Int,
     time::Float64,
-    is_dimensional::Bool,
     dim_params::DimensionParams
 )
     # スカラーSPH出力（svType=1）
@@ -1237,8 +1236,7 @@ end
 
 **Responsibilities & Constraints**
 - 倍精度バイナリ、ヘッダ付き
-- 有次元/無次元フラグ管理
-- リスタート時の無次元化処理
+- 無次元のみ（次元フラグは0固定）
 
 **ファイル命名規則**
 | ファイル種別 | 命名規則 | 例 |
@@ -1268,7 +1266,6 @@ function write_checkpoint(
     grid::GridData,
     step::Int,
     time::Float64,
-    is_dimensional::Bool,
     dim_params::DimensionParams
 )
     # ヘッダ + データ出力
@@ -1280,7 +1277,7 @@ function read_checkpoint(
     dim_params::DimensionParams
 )::Tuple{Int, Float64}
     # Returns: (step, time)
-    # 有次元の場合は無次元化処理
+    # 次元フラグが0以外の場合はエラー
 end
 ```
 

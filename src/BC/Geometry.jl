@@ -4,7 +4,7 @@ using JSON3
 using ..Common
 using ..Grid
 
-export GeometryObject, load_geometry, fill_mask!
+export GeometryObject, load_geometry, fill_mask!, apply_object_velocity!
 
 """
     GeometryObject
@@ -35,10 +35,13 @@ function load_geometry(filepath::String, dim_params::DimensionParams)::Vector{Ge
     U0 = dim_params.U0
 
     json_str = read(filepath, String)
-    data = JSON3.read(json_str) 
-    
+    data = JSON3.read(json_str)
+    if !haskey(data, :objects)
+        error("Geometry file must contain \"objects\".")
+    end
+
     objects = GeometryObject[]
-    for item in data
+    for item in data.objects
         name = String(item.name)
         type = Symbol(item.type)
         vel_dim = haskey(item, :velocity) ? (Float64(item.velocity[1]), Float64(item.velocity[2]), Float64(item.velocity[3])) : (0.0, 0.0, 0.0)
@@ -47,20 +50,22 @@ function load_geometry(filepath::String, dim_params::DimensionParams)::Vector{Ge
         # Parse params based on type
         params = Dict{Symbol, Any}()
         if type == :box
-            pmin = (Float64(item.params.min[1]), Float64(item.params.min[2]), Float64(item.params.min[3]))
-            pmax = (Float64(item.params.max[1]), Float64(item.params.max[2]), Float64(item.params.max[3]))
+            pmin = (Float64(item.min[1]), Float64(item.min[2]), Float64(item.min[3]))
+            pmax = (Float64(item.max[1]), Float64(item.max[2]), Float64(item.max[3]))
             params[:min] = pmin ./ L0
             params[:max] = pmax ./ L0
         elseif type == :cylinder
-            cent = (Float64(item.params.center[1]), Float64(item.params.center[2]), Float64(item.params.center[3]))
+            cent = (Float64(item.center[1]), Float64(item.center[2]), Float64(item.center[3]))
             params[:center] = cent ./ L0
-            params[:radius] = Float64(item.params.radius) / L0
-            params[:height] = Float64(item.params.height) / L0
-            params[:axis] = Symbol(item.params.axis)
+            params[:radius] = Float64(item.radius) / L0
+            params[:height] = Float64(item.height) / L0
+            params[:axis] = Symbol(item.axis)
         elseif type == :sphere
-            cent = (Float64(item.params.center[1]), Float64(item.params.center[2]), Float64(item.params.center[3]))
+            cent = (Float64(item.center[1]), Float64(item.center[2]), Float64(item.center[3]))
             params[:center] = cent ./ L0
-            params[:radius] = Float64(item.params.radius) / L0
+            params[:radius] = Float64(item.radius) / L0
+        else
+            error("Unknown geometry type: $(type)")
         end
 
         push!(objects, GeometryObject(name, type, params, vel))
@@ -120,6 +125,17 @@ function in_sphere(x, y, z, center, radius)
     return dist2 <= radius^2
 end
 
+function is_inside_object(obj::GeometryObject, x, y, z)
+    if obj.type == :box
+        return in_box(x, y, z, obj.params[:min], obj.params[:max])
+    elseif obj.type == :cylinder
+        return in_cylinder(x, y, z, obj.params[:center], obj.params[:radius], obj.params[:height], obj.params[:axis])
+    elseif obj.type == :sphere
+        return in_sphere(x, y, z, obj.params[:center], obj.params[:radius])
+    end
+    return false
+end
+
 
 """
     fill_mask!(mask, objects, grid, par)
@@ -149,26 +165,41 @@ function fill_mask!(
                 
                 is_solid = false
                 for obj in objects
-                    if obj.type == :box
-                        if in_box(x, y, z, obj.params[:min], obj.params[:max])
-                            is_solid = true
-                            break
-                        end
-                    elseif obj.type == :cylinder
-                        if in_cylinder(x, y, z, obj.params[:center], obj.params[:radius], obj.params[:height], obj.params[:axis])
-                            is_solid = true
-                            break
-                        end
-                    elseif obj.type == :sphere
-                        if in_sphere(x, y, z, obj.params[:center], obj.params[:radius])
-                            is_solid = true
-                            break
-                        end
+                    if is_inside_object(obj, x, y, z)
+                        is_solid = true
+                        break
                     end
                 end
                 
                 if is_solid
                     mask[i, j, k] = 0.0
+                end
+            end
+        end
+    end
+end
+
+function apply_object_velocity!(
+    u::Array{Float64, 3},
+    v::Array{Float64, 3},
+    w::Array{Float64, 3},
+    objects::Vector{GeometryObject},
+    grid::GridData
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    @inbounds for k in 1:mz
+        z = grid.z_center[k]
+        for j in 1:my
+            y = grid.y[j]
+            for i in 1:mx
+                x = grid.x[i]
+                for obj in objects
+                    if is_inside_object(obj, x, y, z)
+                        u[i, j, k] = obj.velocity[1]
+                        v[i, j, k] = obj.velocity[2]
+                        w[i, j, k] = obj.velocity[3]
+                        break
+                    end
                 end
             end
         end
