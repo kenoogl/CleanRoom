@@ -95,10 +95,8 @@ function projection_step!(
     poisson_config::PoissonConfig,
     par::String
 )::Tuple{Int, Float64}
-    # 0. Apply BCs to u* (which is passed in buffers.u_star/v_star/w_star implicitly or via buffers)
-    # Note: In RK steps, u* is updated directly into buffers.u_star etc.
-    # We need to apply BCs to these intermediate fields before Divergence/Poisson.
-    apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, bc_set, dt)
+    # 0. Apply BCs to u*
+    apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, buffers.mask, bc_set, dt)
 
     # 1. Interpolate to faces
     interpolate_to_faces!(buffers, grid, par)

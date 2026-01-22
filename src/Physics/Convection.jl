@@ -56,7 +56,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp(buffers.u[i-1, j, k]), fp(u_i), fp(u_ip1), grid.dx, grid.dx, grid.dx, 1e-6)
         val_m = weno3_reconstruct_left(fm(buffers.u[i+2, j, k]), fm(u_ip1), fm(u_i), grid.dx, grid.dx, grid.dx, 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i+1, j, k])
         buffers.flux_u[i, j, k] -= flx / grid.dx
         buffers.flux_u[i+1, j, k] += flx / grid.dx
     end
@@ -72,7 +72,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp_y(buffers.u[i, j-1, k], buffers.v[i, j-1, k]), fp_y(buffers.u[i, j, k], v_j), fp_y(buffers.u[i, j+1, k], v_jp1), grid.dy, grid.dy, grid.dy, 1e-6)
         val_m = weno3_reconstruct_left(fm_y(buffers.u[i, j+2, k], buffers.v[i, j+2, k]), fm_y(buffers.u[i, j+1, k], v_jp1), fm_y(buffers.u[i, j, k], v_j), grid.dy, grid.dy, grid.dy, 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i, j+1, k])
         buffers.flux_u[i, j, k] -= flx / grid.dy
         buffers.flux_u[i, j+1, k] += flx / grid.dy
     end
@@ -88,7 +88,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp_z(buffers.u[i, j, k-1], buffers.w[i, j, k-1]), fp_z(buffers.u[i, j, k], w_k), fp_z(buffers.u[i, j, k+1], w_kp1), grid.dz[k-1], grid.dz[k], grid.dz[k+1], 1e-6)
         val_m = weno3_reconstruct_left(fm_z(buffers.u[i, j, k+2], buffers.w[i, j, k+2]), fm_z(buffers.u[i, j, k+1], w_kp1), fm_z(buffers.u[i, j, k], w_k), grid.dz[k+2], grid.dz[k+1], grid.dz[k], 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i, j, k+1])
         buffers.flux_u[i, j, k] -= flx / grid.dz[k]
         buffers.flux_u[i, j, k+1] += flx / grid.dz[k+1]
     end
@@ -100,17 +100,13 @@ function add_convection_flux!(
         # F = u*v in x
         u_i, u_ip1 = buffers.u[i, j, k], buffers.u[i+1, j, k]
         alpha = max(abs(u_i), abs(u_ip1))
-        fp(v) = 0.5 * (u_i*v + alpha*v) # Approx u as const? Better u*v
-        # No, u varies. fp(v) -> f+(v) = 0.5(u*v + alpha*v)
-        # alpha needs to be max|u|.
-        
         fp_x(v, u) = 0.5 * (u*v + alpha*v)
         fm_x(v, u) = 0.5 * (u*v - alpha*v)
         
         val_p = weno3_reconstruct_left(fp_x(buffers.v[i-1, j, k], buffers.u[i-1, j, k]), fp_x(buffers.v[i, j, k], u_i), fp_x(buffers.v[i+1, j, k], u_ip1), grid.dx, grid.dx, grid.dx, 1e-6)
         val_m = weno3_reconstruct_left(fm_x(buffers.v[i+2, j, k], buffers.u[i+2, j, k]), fm_x(buffers.v[i+1, j, k], u_ip1), fm_x(buffers.v[i, j, k], u_i), grid.dx, grid.dx, grid.dx, 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i+1, j, k])
         buffers.flux_v[i, j, k] -= flx / grid.dx
         buffers.flux_v[i+1, j, k] += flx / grid.dx
     end
@@ -125,7 +121,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp(buffers.v[i, j-1, k]), fp(v_j), fp(v_jp1), grid.dy, grid.dy, grid.dy, 1e-6)
         val_m = weno3_reconstruct_left(fm(buffers.v[i, j+2, k]), fm(v_jp1), fm(v_j), grid.dy, grid.dy, grid.dy, 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i, j+1, k])
         buffers.flux_v[i, j, k] -= flx / grid.dy
         buffers.flux_v[i, j+1, k] += flx / grid.dy
     end
@@ -141,7 +137,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp_z(buffers.v[i, j, k-1], buffers.w[i, j, k-1]), fp_z(buffers.v[i, j, k], w_k), fp_z(buffers.v[i, j, k+1], w_kp1), grid.dz[k-1], grid.dz[k], grid.dz[k+1], 1e-6)
         val_m = weno3_reconstruct_left(fm_z(buffers.v[i, j, k+2], buffers.w[i, j, k+2]), fm_z(buffers.v[i, j, k+1], w_kp1), fm_z(buffers.v[i, j, k], w_k), grid.dz[k+2], grid.dz[k+1], grid.dz[k], 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i, j, k+1])
         buffers.flux_v[i, j, k] -= flx / grid.dz[k]
         buffers.flux_v[i, j, k+1] += flx / grid.dz[k+1]
     end
@@ -160,7 +156,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp_x(buffers.w[i-1, j, k], buffers.u[i-1, j, k]), fp_x(buffers.w[i, j, k], u_i), fp_x(buffers.w[i+1, j, k], u_ip1), grid.dx, grid.dx, grid.dx, 1e-6)
         val_m = weno3_reconstruct_left(fm_x(buffers.w[i+2, j, k], buffers.u[i+2, j, k]), fm_x(buffers.w[i+1, j, k], u_ip1), fm_x(buffers.w[i, j, k], u_i), grid.dx, grid.dx, grid.dx, 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i+1, j, k])
         buffers.flux_w[i, j, k] -= flx / grid.dx
         buffers.flux_w[i+1, j, k] += flx / grid.dx
     end
@@ -176,7 +172,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp_y(buffers.w[i, j-1, k], buffers.v[i, j-1, k]), fp_y(buffers.w[i, j, k], v_j), fp_y(buffers.w[i, j+1, k], v_jp1), grid.dy, grid.dy, grid.dy, 1e-6)
         val_m = weno3_reconstruct_left(fm_y(buffers.w[i, j+2, k], buffers.v[i, j+2, k]), fm_y(buffers.w[i, j+1, k], v_jp1), fm_y(buffers.w[i, j, k], v_j), grid.dy, grid.dy, grid.dy, 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i, j+1, k])
         buffers.flux_w[i, j, k] -= flx / grid.dy
         buffers.flux_w[i, j+1, k] += flx / grid.dy
     end
@@ -192,7 +188,7 @@ function add_convection_flux!(
         val_p = weno3_reconstruct_left(fp(buffers.w[i, j, k-1]), fp(w_k), fp(w_kp1), grid.dz[k-1], grid.dz[k], grid.dz[k+1], 1e-6)
         val_m = weno3_reconstruct_left(fm(buffers.w[i, j, k+2]), fm(w_kp1), fm(w_k), grid.dz[k+2], grid.dz[k+1], grid.dz[k], 1e-6)
         
-        flx = val_p + val_m
+        flx = (val_p + val_m) * (buffers.mask[i, j, k] * buffers.mask[i, j, k+1])
         buffers.flux_w[i, j, k] -= flx / grid.dz[k]
         buffers.flux_w[i, j, k+1] += flx / grid.dz[k+1]
     end

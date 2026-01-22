@@ -64,13 +64,16 @@ function interpolate_to_faces!(
     
     # x-faces (range i=2 to mx ?)
     # u_face_x[i,j,k] = 0.5*(u*[i-1] + u*[i])
-    @inbounds @. buffers.u_face_x[2:end, :, :] = 0.5 * (buffers.u_star[1:end-1, :, :] + buffers.u_star[2:end, :, :])
+    @inbounds @. buffers.u_face_x[2:end, :, :] = 0.5 * (buffers.u_star[1:end-1, :, :] + buffers.u_star[2:end, :, :]) * 
+                                                 buffers.mask[1:end-1, :, :] * buffers.mask[2:end, :, :]
     
     # y-faces
-    @inbounds @. buffers.v_face_y[:, 2:end, :] = 0.5 * (buffers.v_star[:, 1:end-1, :] + buffers.v_star[:, 2:end, :])
+    @inbounds @. buffers.v_face_y[:, 2:end, :] = 0.5 * (buffers.v_star[:, 1:end-1, :] + buffers.v_star[:, 2:end, :]) * 
+                                                 buffers.mask[:, 1:end-1, :] * buffers.mask[:, 2:end, :]
     
     # z-faces
-    @inbounds @. buffers.w_face_z[:, :, 2:end] = 0.5 * (buffers.w_star[:, :, 1:end-1] + buffers.w_star[:, :, 2:end])
+    @inbounds @. buffers.w_face_z[:, :, 2:end] = 0.5 * (buffers.w_star[:, :, 1:end-1] + buffers.w_star[:, :, 2:end]) * 
+                                                 buffers.mask[:, :, 1:end-1] * buffers.mask[:, :, 2:end]
     
     # Note: Boundary faces (ex i=3 start of real domain).
     # u_face_x[3] = 0.5*(u[2] + u[3]). u[2] is ghost.
@@ -220,7 +223,7 @@ function fractional_step!(
     compute_pseudo_velocity!(buffers, grid, dt, par)
     
     # 2.5 Apply BCs to Pseudo Velocity
-    apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, bc_set, dt)
+    apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, buffers.mask, bc_set, dt)
 
     # 3. Interpolate to Faces
     interpolate_to_faces!(buffers, grid, par)

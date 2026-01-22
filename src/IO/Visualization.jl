@@ -19,20 +19,19 @@ struct VizConfig
 end
 
 # Default implementation (stub)
+# Default implementation (Generic fallback)
 function render_slice(
-    buffers::CFDBuffers,
-    grid::GridData,
-    config::VizConfig,
-    step::Int,
-    dim_params::DimensionParams
+    buffers,
+    grid,
+    config,
+    step,
+    dim_params
 )
-    # This will be overwritten by Extension if CairoMakie is loaded
-    # Or implies text output is handled here?
-    # Text output doesn't need CairoMakie.
+    # This will be specialized by Extension if CairoMakie is loaded.
+    # The default handles text output if requested.
     if config.text_output
         write_slice_text("$(config.output_dir)/slice_$(step).txt", buffers, grid, config, dim_params)
     end
-    # If no plotting (CairoMakie missing), specific plotting config does nothing.
 end
 
 function write_slice_text(

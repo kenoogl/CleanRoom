@@ -199,13 +199,15 @@ function apply_outflow!(
 end
 
 """
-    set_boundary_value!(phi, grid, face, val, type)
+    set_boundary_value!(phi, grid, mask, face, val, type)
 
-Helper to set Dirichlet/Neumann on a face.
+Helper to set Dirichlet/Neumann on a face, considering the mask.
+For Dirichlet flow, the velocity is masked to 0 on solid regions.
 """
 function set_boundary_value!(
     phi::Array{Float64, 3},
     grid::GridData,
+    mask::Array{Float64, 3},
     face::Symbol,
     val::Float64,
     type::VelocityBCType
@@ -214,17 +216,36 @@ function set_boundary_value!(
     
     if type == Dirichlet
         if face == :x_min
-             @inbounds phi[1:2, :, :] .= val
+             # Use mask from first internal cell (i=3)
+             @inbounds for k in 1:mz, j in 1:my
+                 phi[1, j, k] = val * mask[3, j, k]
+                 phi[2, j, k] = val * mask[3, j, k]
+             end
         elseif face == :x_max
-             @inbounds phi[mx-1:mx, :, :] .= val
+             @inbounds for k in 1:mz, j in 1:my
+                 phi[mx-1, j, k] = val * mask[mx-2, j, k]
+                 phi[mx, j, k] = val * mask[mx-2, j, k]
+             end
         elseif face == :y_min
-             @inbounds phi[:, 1:2, :] .= val
+             @inbounds for k in 1:mz, i in 1:mx
+                 phi[i, 1, k] = val * mask[i, 3, k]
+                 phi[i, 2, k] = val * mask[i, 3, k]
+             end
         elseif face == :y_max
-             @inbounds phi[:, my-1:my, :] .= val
+             @inbounds for k in 1:mz, i in 1:mx
+                 phi[i, my-1, k] = val * mask[i, my-2, k]
+                 phi[i, my, k] = val * mask[i, my-2, k]
+             end
         elseif face == :z_min
-             @inbounds phi[:, :, 1:2] .= val
+             @inbounds for j in 1:my, i in 1:mx
+                 phi[i, j, 1] = val * mask[i, j, 3]
+                 phi[i, j, 2] = val * mask[i, j, 3]
+             end
         elseif face == :z_max
-             @inbounds phi[:, :, mz-1:mz] .= val
+             @inbounds for j in 1:my, i in 1:mx
+                 phi[i, j, mz-1] = val * mask[i, j, mz-2]
+                 phi[i, j, mz] = val * mask[i, j, mz-2]
+             end
         end
     elseif type == Neumann
         if face == :x_min
@@ -350,7 +371,7 @@ end
 
 
 """
-    apply_velocity_bcs!(u, v, w, grid, bc_set, dt)
+    apply_velocity_bcs!(u, v, w, grid, mask, bc_set, dt)
 
 指定された速度場(u, v, w)に対して境界条件を適用する。
 """
@@ -359,19 +380,20 @@ function apply_velocity_bcs!(
     v::Array{Float64, 3},
     w::Array{Float64, 3},
     grid::GridData,
+    mask::Array{Float64, 3},
     bc_set::BoundaryConditionSet,
     dt::Float64
 )
     # 1. External Boundaries
     function apply_ext(bc, face)
         if bc.velocity_type == Dirichlet
-             set_boundary_value!(u, grid, face, bc.velocity_value[1], Dirichlet)
-             set_boundary_value!(v, grid, face, bc.velocity_value[2], Dirichlet)
-             set_boundary_value!(w, grid, face, bc.velocity_value[3], Dirichlet)
+             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], Dirichlet)
+             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], Dirichlet)
+             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], Dirichlet)
         elseif bc.velocity_type == Neumann
-             set_boundary_value!(u, grid, face, 0.0, Neumann)
-             set_boundary_value!(v, grid, face, 0.0, Neumann)
-             set_boundary_value!(w, grid, face, 0.0, Neumann)
+             set_boundary_value!(u, grid, mask, face, 0.0, Neumann)
+             set_boundary_value!(v, grid, mask, face, 0.0, Neumann)
+             set_boundary_value!(w, grid, mask, face, 0.0, Neumann)
         elseif bc.velocity_type == Outflow
              Uc = compute_face_average_velocity(u, v, w, grid, face)
              apply_outflow!(u, grid, face, dt, Uc)
@@ -406,12 +428,41 @@ function apply_velocity_bcs!(
         apply_ext(bc_set.z_max, :z_max)
     end
     
-    # 2. Inlets / Outlets (Overwrite External potentially)
-    # TODO: Implement inlet logic
+    # 2. Inlets
+    for inlet in bc_set.inlets
+        # セルセンターまたはフェイスで座標判定
+        for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+            x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
+            
+            in_range = false
+            if inlet.type == :rectangular
+                if inlet.normal == (1, 0, 0) || inlet.normal == (-1, 0, 0)
+                    if abs(x - inlet.position[1]) < grid.dx &&
+                       abs(y - inlet.position[2]) <= inlet.size[1]*0.5 &&
+                       abs(z - inlet.position[3]) <= inlet.size[2]*0.5
+                        in_range = true
+                    end
+                elseif inlet.normal == (0, 0, 1) || inlet.normal == (0, 0, -1)
+                    if abs(z - inlet.position[3]) < grid.dz[k] &&
+                       abs(x - inlet.position[1]) <= inlet.size[1]*0.5 &&
+                       abs(y - inlet.position[2]) <= inlet.size[2]*0.5
+                        in_range = true
+                    end
+                end
+            end
+            
+            # マスクを確認し、固体領域には適用しない（壁として扱う）
+            if in_range && mask[i, j, k] > 0.5
+                u[i, j, k] = inlet.velocity[1]
+                v[i, j, k] = inlet.velocity[2]
+                w[i, j, k] = inlet.velocity[3]
+            end
+        end
+    end
     
     # 3. Internal Boundaries
     for ib in bc_set.internal_boundaries
-         # Implemented logic for Internal BCs would go here
+         # TODO: Internal Dirichlet/Neumann logic
     end
 end
 
@@ -423,7 +474,7 @@ function apply_boundary_conditions!(
     par::String
 )
     # Apply Velocity BCs
-    apply_velocity_bcs!(buffers.u, buffers.v, buffers.w, grid, bc_set, dt)
+    apply_velocity_bcs!(buffers.u, buffers.v, buffers.w, grid, buffers.mask, bc_set, dt)
     
     # Apply Periodic Pressure BCs
     apply_periodic_pressure!(buffers.p, grid, bc_set)

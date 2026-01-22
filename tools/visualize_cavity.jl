@@ -17,67 +17,7 @@ Example:
 
 using CairoMakie
 
-"""
-Read SPH vector file (V-Isio format)
-Returns: (u, v, w, nx, ny, nz, origin, pitch, time, step)
-"""
-function read_sph_vector(filepath::String)
-    open(filepath, "r") do io
-        # Record 1: svType, dType
-        rec1_size = read(io, Int32)
-        svType = read(io, Int32)
-        dType = read(io, Int32)
-        read(io, Int32)  # end marker
-        
-        if svType != 2
-            error("Expected vector SPH (svType=2), got $svType")
-        end
-        
-        # Record 2: nx, ny, nz
-        rec2_size = read(io, Int32)
-        nx = read(io, Int32)
-        ny = read(io, Int32)
-        nz = read(io, Int32)
-        read(io, Int32)  # end marker
-        
-        # Record 3: time, step, origin, pitch
-        rec3_size = read(io, Int32)
-        time = read(io, Float32)
-        step = read(io, Int32)
-        x0 = read(io, Float32)
-        y0 = read(io, Float32)
-        z0 = read(io, Float32)
-        dx = read(io, Float32)
-        dy = read(io, Float32)
-        dz = read(io, Float32)
-        read(io, Int32)  # end marker
-        
-        # Record 4: Vector data (u, v, w interleaved)
-        rec4_size = read(io, Int32)
-        data = Vector{Float32}(undef, 3 * nx * ny * nz)
-        read!(io, data)
-        read(io, Int32)  # end marker
-        
-        # Unpack interleaved data
-        u = zeros(Float32, nx, ny, nz)
-        v = zeros(Float32, nx, ny, nz)
-        w = zeros(Float32, nx, ny, nz)
-        
-        idx = 1
-        for k in 1:nz, j in 1:ny, i in 1:nx
-            u[i, j, k] = data[idx]
-            v[i, j, k] = data[idx + 1]
-            w[i, j, k] = data[idx + 2]
-            idx += 3
-        end
-        
-        origin = (x0, y0, z0)
-        pitch = (dx, dy, dz)
-        
-        return (u=u, v=v, w=w, nx=nx, ny=ny, nz=nz, 
-                origin=origin, pitch=pitch, time=time, step=step)
-    end
-end
+include("sph_reader.jl")
 
 """
 Extract centerline profiles at Y=0.5 plane for Ghia-style plots
@@ -86,8 +26,8 @@ Extract centerline profiles at Y=0.5 plane for Ghia-style plots
 """
 function extract_centerline_profiles(data)
     nx, ny, nz = data.nx, data.ny, data.nz
-    x0, y0, z0 = data.origin
-    dx, dy, dz = data.pitch
+    x0, y0, z0 = data.x0, data.y0, data.z0
+    dx, dy, dz = data.dx, data.dy, data.dz
     
     # Coordinate arrays (cell centers)
     # SPH origin is at left edge of first cell

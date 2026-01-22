@@ -193,21 +193,25 @@ function load_parameters(filepath::String)::SimulationParams
 end
 
 """
-    load_boundary_conditions(filepath::String)::BoundaryConditionSet
+    load_boundary_conditions(filepath::String, dim_params::DimensionParams)::BoundaryConditionSet
 
 境界条件JSONを読み込む。
 """
-function load_boundary_conditions(filepath::String)::BoundaryConditionSet
+function load_boundary_conditions(filepath::String, dim_params::DimensionParams)::BoundaryConditionSet
     if !isfile(filepath)
         error("Boundary condition file not found: $filepath")
     end
+
+    L0 = dim_params.L0
+    U0 = dim_params.U0
 
     json_str = read(filepath, String)
     data = JSON3.read(json_str)
 
     function parse_bc(bc_data)
         t = Symbol(bc_data.type)
-        val = haskey(bc_data, :value) ? parse_tuple3(bc_data.value) : (0.0, 0.0, 0.0)
+        val_dim = haskey(bc_data, :value) ? parse_tuple3(bc_data.value) : (0.0, 0.0, 0.0)
+        val = val_dim ./ U0
         
         bc_type = if t == :Dirichlet; Dirichlet
                   elseif t == :Neumann; Neumann
@@ -228,13 +232,16 @@ function load_boundary_conditions(filepath::String)::BoundaryConditionSet
     inlets = InletOutlet[]
     if haskey(data, :Inlets)
         for item in data.Inlets
+            pos = parse_tuple3(item.position) ./ L0
+            sz = parse_tuple2(item.size) ./ L0
+            vel = parse_tuple3(item.velocity) ./ U0
             push!(inlets, InletOutlet(
                 Symbol(item.shape),
-                parse_tuple3(item.position),
-                parse_tuple2(item.size),
+                pos,
+                sz,
                 parse_tuple3_int(item.normal),
-                Dirichlet, # TODO: config might specify type? Usually inlets are Dirichlet
-                parse_tuple3(item.velocity)
+                Dirichlet, 
+                vel
             ))
         end
     end
@@ -244,24 +251,22 @@ function load_boundary_conditions(filepath::String)::BoundaryConditionSet
         for item in data.Outlets
             cond = Symbol(get(item, :condition, "Outflow"))
             bctype = (cond == :Dirichlet) ? Dirichlet : Outflow
-             # TODO: size can be array of 2 floats or radius?
-             # Design doc says "size::NTuple{2, Float64}"
-             # If cylinder, maybe size[1]=radius?
-             # I'll Assume JSON matches NTuple structure or handle it.
-             # If shape is cylindrical, item.radius might exist.
-             sz = if Symbol(item.shape) == :cylindrical
+            pos = parse_tuple3(item.position) ./ L0
+            
+             sz_dim = if Symbol(item.shape) == :cylindrical
                  (Float64(get(item, :radius, 0.0)), 0.0)
              else
                  parse_tuple2(item.size)
              end
+             sz = sz_dim ./ L0
 
             push!(outlets, InletOutlet(
                 Symbol(item.shape),
-                parse_tuple3(item.position),
+                pos,
                 sz,
                 parse_tuple3_int(item.normal),
                 bctype,
-                (0.0,0.0,0.0) # velocity ignored for outflow usually, or 0
+                (0.0,0.0,0.0)
             ))
         end
     end
@@ -271,23 +276,23 @@ function load_boundary_conditions(filepath::String)::BoundaryConditionSet
         for item in data.InternalBoundaries
             shape = Symbol(item.type)
             norm = parse_tuple3_int(item.normal)
-            vel = parse_tuple3(item.velocity)
+            vel = parse_tuple3(item.velocity) ./ U0
             
             if shape == :rectangular
-                rmin = parse_tuple3(item.region_min)
-                rmax = parse_tuple3(item.region_max)
+                rmin = parse_tuple3(item.region_min) ./ L0
+                rmax = parse_tuple3(item.region_max) ./ L0
                 push!(internal_bcs, InternalBoundary(
                     shape, rmin, rmax,
-                    (0.0,0.0,0.0), 0.0, 0.0, :z, # dummy for cylinder
+                    (0.0,0.0,0.0), 0.0, 0.0, :z,
                     norm, vel
                 ))
             elseif shape == :cylindrical
-                cent = parse_tuple3(item.center)
-                rad = Float64(item.radius)
-                h = Float64(item.height)
+                cent = parse_tuple3(item.center) ./ L0
+                rad = Float64(item.radius) / L0
+                h = Float64(item.height) / L0
                 ax = Symbol(item.axis)
                 push!(internal_bcs, InternalBoundary(
-                    shape, (0.0,0.0,0.0), (0.0,0.0,0.0), # dummy for rect
+                    shape, (0.0,0.0,0.0), (0.0,0.0,0.0), 
                     cent, rad, h, ax,
                     norm, vel
                 ))

@@ -91,11 +91,11 @@ function run_simulation(param_file::String)
          println("Warning: BC file not found at $bc_path.")
          return
     end
-    bc_set = load_boundary_conditions(bc_path)
+    bc_set = load_boundary_conditions(bc_path, dim_params)
     
     geo_path = replace(param_file, r"[^/\\]*$" => "geometry.json")
     if isfile(geo_path)
-        objects = load_geometry(geo_path)
+        objects = load_geometry(geo_path, dim_params)
         println("Loaded $(length(objects)) geometry objects.")
         fill_mask!(buffers.mask, objects, grid, "thread")
     else
@@ -107,6 +107,11 @@ function run_simulation(param_file::String)
     fill!(buffers.w, sim_params.initial_condition.velocity[3] / dim_params.U0)
     fill!(buffers.p, sim_params.initial_condition.pressure / (dim_params.U0^2)) 
     
+    # マスクを用いて固体領域の初期速度・圧力をゼロにする
+    @inbounds @. buffers.u *= buffers.mask
+    @inbounds @. buffers.v *= buffers.mask
+    @inbounds @. buffers.w *= buffers.mask
+    @inbounds @. buffers.p *= buffers.mask    
     start_step = 0
     start_time = 0.0
     if sim_params.start == :restart
@@ -202,7 +207,25 @@ function run_simulation(param_file::String)
         end
         
         if sim_params.visualization.interval > 0 && step % sim_params.visualization.interval == 0
-             render_slice(buffers, grid, sim_params.visualization, step, dim_params)
+             # Create absolute path for visualization output
+             viz_config = sim_params.visualization
+             abs_viz_dir = joinpath(out_dir, viz_config.output_dir)
+             
+             # Create a modified config pointing to absolute directory
+             # Since VizConfig is a struct, we create a new one with the updated path
+             new_viz_config = VizConfig(
+                 viz_config.interval,
+                 viz_config.plane,
+                 viz_config.plane_index,
+                 viz_config.variables,
+                 viz_config.output_format,
+                 abs_viz_dir,
+                 viz_config.vector_enabled,
+                 viz_config.vector_skip,
+                 viz_config.text_output
+             )
+             
+             render_slice(buffers, grid, new_viz_config, step, dim_params)
         end
         
     end

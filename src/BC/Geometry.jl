@@ -19,51 +19,48 @@ struct GeometryObject
 end
 
 """
-    load_geometry(filepath::String)::Vector{GeometryObject}
+    load_geometry(filepath::String, dim_params::DimensionParams)::Vector{GeometryObject}
 
 Geometry JSONから物体リストを読み込む。
 """
-function load_geometry(filepath::String)::Vector{GeometryObject}
+function load_geometry(filepath::String, dim_params::DimensionParams)::Vector{GeometryObject}
     if !isfile(filepath)
-         # If file doesn't exist, return empty list (no objects)
-         # Or error? Spec says Requirement 9.3 "Geometry JSON読込".
-         # Usually valid path expected. But if no geometry, user might not provide file?
-         # Design doc system flow doesn't explicitly handle optionality.
-         # But "Objects" usually exist.
-         # I'll return empty if file not found, but log warning?
-         # Or error. Let's error to be safe, unless explicit empty.
-         # But wait, main driver might pass a default path.
          if filepath == "" 
              return GeometryObject[]
          end
-         # If path provided but missing, error.
          error("Geometry file not found: $filepath")
     end
 
+    L0 = dim_params.L0
+    U0 = dim_params.U0
+
     json_str = read(filepath, String)
-    data = JSON3.read(json_str) # Expects list or object with list?
-    # Usually list of objects.
-    # Assume root is array of objects.
+    data = JSON3.read(json_str) 
     
     objects = GeometryObject[]
     for item in data
         name = String(item.name)
         type = Symbol(item.type)
-        vel = haskey(item, :velocity) ? (Float64(item.velocity[1]), Float64(item.velocity[2]), Float64(item.velocity[3])) : (0.0, 0.0, 0.0)
+        vel_dim = haskey(item, :velocity) ? (Float64(item.velocity[1]), Float64(item.velocity[2]), Float64(item.velocity[3])) : (0.0, 0.0, 0.0)
+        vel = vel_dim ./ U0
         
         # Parse params based on type
         params = Dict{Symbol, Any}()
         if type == :box
-            params[:min] = (Float64(item.params.min[1]), Float64(item.params.min[2]), Float64(item.params.min[3]))
-            params[:max] = (Float64(item.params.max[1]), Float64(item.params.max[2]), Float64(item.params.max[3]))
+            pmin = (Float64(item.params.min[1]), Float64(item.params.min[2]), Float64(item.params.min[3]))
+            pmax = (Float64(item.params.max[1]), Float64(item.params.max[2]), Float64(item.params.max[3]))
+            params[:min] = pmin ./ L0
+            params[:max] = pmax ./ L0
         elseif type == :cylinder
-            params[:center] = (Float64(item.params.center[1]), Float64(item.params.center[2]), Float64(item.params.center[3]))
-            params[:radius] = Float64(item.params.radius)
-            params[:height] = Float64(item.params.height)
+            cent = (Float64(item.params.center[1]), Float64(item.params.center[2]), Float64(item.params.center[3]))
+            params[:center] = cent ./ L0
+            params[:radius] = Float64(item.params.radius) / L0
+            params[:height] = Float64(item.params.height) / L0
             params[:axis] = Symbol(item.params.axis)
         elseif type == :sphere
-            params[:center] = (Float64(item.params.center[1]), Float64(item.params.center[2]), Float64(item.params.center[3]))
-            params[:radius] = Float64(item.params.radius)
+            cent = (Float64(item.params.center[1]), Float64(item.params.center[2]), Float64(item.params.center[3]))
+            params[:center] = cent ./ L0
+            params[:radius] = Float64(item.params.radius) / L0
         end
 
         push!(objects, GeometryObject(name, type, params, vel))
