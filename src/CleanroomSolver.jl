@@ -117,8 +117,10 @@ function run_simulation(param_file::String)
         objects = load_geometry(geo_path, dim_params)
         println("Loaded $(length(objects)) geometry objects.")
         fill_mask!(buffers.mask, objects, grid, "thread")
+        apply_boundary_mask!(buffers.mask, grid, bc_set)
     else
         println("No geometry file found. Domain is empty.")
+        apply_boundary_mask!(buffers.mask, grid, bc_set)
     end
     
     fill!(buffers.u, sim_params.initial_condition.velocity[1] / dim_params.U0) 
@@ -209,9 +211,16 @@ function run_simulation(param_file::String)
         end
         
         if check_divergence(div_max, monitor_config.div_threshold)
-            println("Error: Divergence detected at step $step (Div=$div)")
+            # Convert to internal cell coordinates (excluding ghosts)
+            internal_i = div_i - 2
+            internal_j = div_j - 2
+            internal_k = div_k - 2
+            println("Error: Divergence detected at step $step (Div=$div_max)")
+            println("  Max divergence location: internal cell ($internal_i, $internal_j, $internal_k)")
+            println("  Grid indices (with ghost): ($div_i, $div_j, $div_k)")
+            println("  Velocity at location: u=$(buffers.u[div_i,div_j,div_k]), v=$(buffers.v[div_i,div_j,div_k]), w=$(buffers.w[div_i,div_j,div_k])")
             break
-        end 
+        end
         
         if sim_params.intervals.instantaneous > 0 && step % sim_params.intervals.instantaneous == 0
             fname = generate_sph_filename(joinpath(out_dir, "vel"), step)

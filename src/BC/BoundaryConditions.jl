@@ -7,7 +7,7 @@ using ..Fields
 export VelocityBCType, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
 export Dirichlet, Neumann, Outflow, Periodic
 export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
-export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!
+export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!, apply_face_velocity_bcs!, apply_boundary_mask!
 
 @enum VelocityBCType begin
     Dirichlet
@@ -15,6 +15,8 @@ export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_v
     Outflow
     Periodic
     Symmetric
+    Wall
+    SlidingWall
 end
 
 struct ExternalBC
@@ -682,6 +684,14 @@ function apply_velocity_bcs!(
              apply_outflow!(w, grid, face, dt, Uc)
         elseif bc.velocity_type == Symmetric
              apply_symmetric_bc!(u, v, w, grid, face)
+        elseif bc.velocity_type == Wall
+             set_boundary_value!(u, grid, mask, face, 0.0, Dirichlet)
+             set_boundary_value!(v, grid, mask, face, 0.0, Dirichlet)
+             set_boundary_value!(w, grid, mask, face, 0.0, Dirichlet)
+        elseif bc.velocity_type == SlidingWall
+             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], Dirichlet)
+             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], Dirichlet)
+             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], Dirichlet)
         end
     end
 
@@ -968,6 +978,187 @@ function apply_periodic_face_velocity!(
             w_face[i, j, mz] = w_face[i, j, 4]
         end
     end
+end
+
+
+"""
+    apply_symmetric_face_bc!(u_f, v_f, w_f, grid, face)
+
+セルフェイス速度に対称境界条件を適用する。
+- 法線方向フェイス速度: 境界位置で 0、ゴーストで符号反転
+- 接線方向フェイス速度: ゴーストでミラーリング
+"""
+function apply_symmetric_face_bc!(
+    u_f::Array{Float64, 3},
+    v_f::Array{Float64, 3},
+    w_f::Array{Float64, 3},
+    grid::GridData,
+    face::Symbol
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    
+    if face == :x_min
+        # 境界位置: i=3 (x=2.5)
+        @inbounds for k in 1:mz, j in 1:my
+            u_f[3, j, k] = 0.0
+            u_f[2, j, k] = -u_f[4, j, k]
+            u_f[1, j, k] = -u_f[5, j, k]
+            v_f[2, j, k] = v_f[3, j, k]
+            v_f[1, j, k] = v_f[4, j, k]
+            w_f[2, j, k] = w_f[3, j, k]
+            w_f[1, j, k] = w_f[4, j, k]
+        end
+    elseif face == :x_max
+        # 境界位置: i=mx-1 (x=mx-1.5)
+        @inbounds for k in 1:mz, j in 1:my
+            u_f[mx-1, j, k] = 0.0
+            u_f[mx, j, k] = -u_f[mx-2, j, k]
+            v_f[mx-1, j, k] = v_f[mx-2, j, k]
+            v_f[mx, j, k] = v_f[mx-3, j, k]
+            w_f[mx-1, j, k] = w_f[mx-2, j, k]
+            w_f[mx, j, k] = w_f[mx-3, j, k]
+        end
+    elseif face == :y_min
+        # 境界位置: j=3 (y=2.5)
+        @inbounds for k in 1:mz, i in 1:mx
+            v_f[i, 3, k] = 0.0
+            v_f[i, 2, k] = -v_f[i, 4, k]
+            v_f[i, 1, k] = -v_f[i, 5, k]
+            u_f[i, 2, k] = u_f[i, 3, k]
+            u_f[i, 1, k] = u_f[i, 4, k]
+            w_f[i, 2, k] = w_f[i, 3, k]
+            w_f[i, 1, k] = w_f[i, 4, k]
+        end
+    elseif face == :y_max
+        # 境界位置: j=my-1 (y=my-1.5)
+        @inbounds for k in 1:mz, i in 1:mx
+            v_f[i, my-1, k] = 0.0
+            v_f[i, my, k] = -v_f[i, my-2, k]
+            u_f[i, my-1, k] = u_f[i, my-2, k]
+            u_f[i, my, k] = u_f[i, my-3, k]
+            w_f[i, my-1, k] = w_f[i, my-2, k]
+            w_f[i, my, k] = w_f[i, my-3, k]
+        end
+    elseif face == :z_min
+        # 境界位置: k=3 (z=2.5)
+        @inbounds for j in 1:my, i in 1:mx
+            w_f[i, j, 3] = 0.0
+            w_f[i, j, 2] = -w_f[i, j, 4]
+            w_f[i, j, 1] = -w_f[i, j, 5]
+            u_f[i, j, 2] = u_f[i, j, 3]
+            u_f[i, j, 1] = u_f[i, j, 4]
+            v_f[i, j, 2] = v_f[i, j, 3]
+            v_f[i, j, 1] = v_f[i, j, 4]
+        end
+    elseif face == :z_max
+        # 境界位置: k=mz-1 (z=mz-1.5)
+        @inbounds for j in 1:my, i in 1:mx
+            w_f[i, j, mz-1] = 0.0
+            w_f[i, j, mz] = -w_f[i, j, mz-2]
+            u_f[i, j, mz-1] = u_f[i, j, mz-2]
+            u_f[i, j, mz] = u_f[i, j, mz-3]
+            v_f[i, j, mz-1] = v_f[i, j, mz-2]
+            v_f[i, j, mz] = v_f[i, j, mz-3]
+        end
+    end
+end
+
+"""
+    apply_face_velocity_bcs!(u_f, v_f, w_f, grid, mask, bc_set, dt)
+
+セルフェイス速度の境界条件を一括適用する。
+"""
+function apply_face_velocity_bcs!(
+    u_f::Array{Float64, 3},
+    v_f::Array{Float64, 3},
+    w_f::Array{Float64, 3},
+    grid::GridData,
+    mask::Array{Float64, 3},
+    bc_set::BoundaryConditionSet,
+    dt::Float64
+)
+    # 1. External Boundaries
+    function apply_ext_face(bc, face)
+        if bc.velocity_type == Symmetric
+            apply_symmetric_face_bc!(u_f, v_f, w_f, grid, face)
+        elseif bc.velocity_type == Wall
+            # Handled by mask in FractionalStep, but we can be explicit here
+            # for boundary faces.
+            if face == :x_min; u_f[3, :, :] .= 0.0; elseif face == :x_max; u_f[grid.mx-1, :, :] .= 0.0; end
+            if face == :y_min; v_f[:, 3, :] .= 0.0; elseif face == :y_max; v_f[:, grid.my-1, :] .= 0.0; end
+            if face == :z_min; w_f[:, :, 3] .= 0.0; elseif face == :z_max; w_f[:, :, grid.mz-1] .= 0.0; end
+        elseif bc.velocity_type == SlidingWall
+            if face == :x_min; u_f[3, :, :] .= bc.velocity_value[1]; elseif face == :x_max; u_f[grid.mx-1, :, :] .= bc.velocity_value[1]; end
+            if face == :y_min; v_f[:, 3, :] .= bc.velocity_value[2]; elseif face == :y_max; v_f[:, grid.my-1, :] .= bc.velocity_value[2]; end
+            if face == :z_min; w_f[:, :, 3] .= bc.velocity_value[3]; elseif face == :z_max; w_f[:, :, grid.mz-1] .= bc.velocity_value[3]; end
+        end
+    end
+
+    x_periodic = bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
+    y_periodic = bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
+    z_periodic = bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+
+    if x_periodic
+        apply_periodic_face_velocity!(u_f, v_f, w_f, grid, :x)
+    else
+        apply_ext_face(bc_set.x_min, :x_min)
+        apply_ext_face(bc_set.x_max, :x_max)
+    end
+
+    if y_periodic
+        apply_periodic_face_velocity!(u_f, v_f, w_f, grid, :y)
+    else
+        apply_ext_face(bc_set.y_min, :y_min)
+        apply_ext_face(bc_set.y_max, :y_max)
+    end
+
+    if z_periodic
+        apply_periodic_face_velocity!(u_f, v_f, w_f, grid, :z)
+    else
+        apply_ext_face(bc_set.z_min, :z_min)
+        apply_ext_face(bc_set.z_max, :z_max)
+    end
+end
+
+
+"""
+    apply_boundary_mask!(mask, grid, bc_set)
+
+外部境界条件に基づいてゴーストセルのマスク値を設定する。
+- Symmetric or Wall: 0.0 (Solid)
+- Others: 1.0 (Fluid)
+"""
+function apply_boundary_mask!(
+    mask::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+
+    function set_mask(bc, face)
+        if bc.velocity_type == Symmetric || bc.velocity_type == Wall || bc.velocity_type == SlidingWall
+            if face == :x_min
+                mask[1:2, :, :] .= 0.0
+            elseif face == :x_max
+                mask[mx-1:mx, :, :] .= 0.0
+            elseif face == :y_min
+                mask[:, 1:2, :] .= 0.0
+            elseif face == :y_max
+                mask[:, my-1:my, :] .= 0.0
+            elseif face == :z_min
+                mask[:, :, 1:2] .= 0.0
+            elseif face == :z_max
+                mask[:, :, mz-1:mz] .= 0.0
+            end
+        end
+    end
+
+    set_mask(bc_set.x_min, :x_min)
+    set_mask(bc_set.x_max, :x_max)
+    set_mask(bc_set.y_min, :y_min)
+    set_mask(bc_set.y_max, :y_max)
+    set_mask(bc_set.z_min, :z_min)
+    set_mask(bc_set.z_max, :z_max)
 end
 
 end # module BoundaryConditions

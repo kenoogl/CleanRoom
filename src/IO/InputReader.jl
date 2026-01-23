@@ -5,7 +5,7 @@ using ..Common
 using ..Grid
 using ..Fields: estimate_memory_size
 using ..TimeIntegration
-using ..BoundaryConditions: Dirichlet, Neumann, Outflow, Periodic, Symmetric, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
+using ..BoundaryConditions: Dirichlet, Neumann, Outflow, Periodic, Symmetric, Wall, SlidingWall, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
 using ..PressureSolver
 using ..Visualization
 
@@ -128,10 +128,10 @@ function load_parameters(filepath::String)::SimulationParams
     origin = parse_tuple3(data.Origin_of_Region)
     dom = data.Domain
     z_grid = data.Z_grid
-    z_type_str = String(z_grid.type)
+    z_type_str = lowercase(String(z_grid.type))
     z_type = if z_type_str == "uniform"
         :uniform
-    elseif z_type_str == "non-uniform"
+    elseif z_type_str == "non-uniform" || z_type_str == "non_uniform"
         :non_uniform
     else
         error("Unknown Z_grid.type: $(z_type_str)")
@@ -151,11 +151,12 @@ function load_parameters(filepath::String)::SimulationParams
 
     # --- Time & Stability ---
     courant_number = Float64(data.Courant_number)
-    time_scheme_str = String(get(data, :Time_Integration_Scheme, "Euler"))
-    time_scheme = Symbol(time_scheme_str)
-    if !(time_scheme in (:Euler, :RK2, :RK4))
-        error("Unknown Time_Integration_Scheme: $(time_scheme_str)")
-    end
+    time_scheme_str = lowercase(String(get(data, :Time_Integration_Scheme, "euler")))
+    time_scheme = if time_scheme_str == "euler"; :Euler
+                  elseif time_scheme_str == "rk2"; :RK2
+                  elseif time_scheme_str == "rk4"; :RK4
+                  else; error("Unknown Time_Integration_Scheme: $(time_scheme_str)")
+                  end
 
     # --- Intervals ---
     intv = data.Intervals
@@ -177,10 +178,10 @@ function load_parameters(filepath::String)::SimulationParams
     else
         VizConfig(
             Int(get(viz, :interval, 0)),
-            Symbol(get(viz, :plane, "xy")),
+            Symbol(lowercase(String(get(viz, :plane, "xy")))),
             Int(get(viz, :plane_index, 1)),
-            Symbol.(get(viz, :variables, ["velocity", "pressure"])),
-            Symbol(get(viz, :output_format, "png")),
+            [Symbol(lowercase(String(v))) for v in get(viz, :variables, ["velocity", "pressure"])],
+            Symbol(lowercase(String(get(viz, :output_format, "png")))),
             String(get(viz, :output_dir, "viz")),
             Bool(get(viz, :vector_enabled, false)),
             Int(get(viz, :vector_skip, 1)),
@@ -190,14 +191,14 @@ function load_parameters(filepath::String)::SimulationParams
 
     # --- Poisson ---
     p = data.Poisson_parameter
-    p_solver = Symbol(get(p, :solver, "RedBlackSOR"))
-    solver_type = if p_solver == :CG; CG
-                  elseif p_solver == :BiCGSTAB; BiCGSTAB
+    p_solver_str = lowercase(String(get(p, :solver, "redbacksor")))
+    solver_type = if p_solver_str == "cg"; CG
+                  elseif p_solver_str == "bicgstab"; BiCGSTAB
                   else; RedBlackSOR
                   end
     
-    div_action = Symbol(get(p, :on_divergence, "WarnContinue"))
-    action_type = (div_action == :Abort) ? Abort : WarnContinue
+    div_action_str = lowercase(String(get(p, :on_divergence, "warncontinue")))
+    action_type = (div_action_str == "abort") ? Abort : WarnContinue
 
     poisson_config = PoissonConfig(
         solver_type,
@@ -262,12 +263,14 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                   elseif vel_str == "outflow"; Outflow
                   elseif vel_str == "periodic"; Periodic
                   elseif vel_str == "symmetric"; Symmetric
+                  elseif vel_str == "wall"; Wall
+                  elseif vel_str == "slidingwall" || vel_str == "sliding_wall"; SlidingWall
                   else; error("Unknown velocity BC type: $(vel_str)")
                   end
         val = (0.0, 0.0, 0.0)
-        if bc_type == Dirichlet
+        if bc_type == Dirichlet || bc_type == SlidingWall
             if !haskey(bc_data, :value)
-                error("Dirichlet boundary requires value.")
+                error("$(bc_type) boundary requires value.")
             end
             val_dim = parse_tuple3(bc_data.value)
             val = val_dim ./ U0
@@ -285,9 +288,9 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     inlets = InletOutlet[]
     if haskey(data, :inlets)
         for item in data.inlets
-            shape = Symbol(item.type)
-            if shape != :rectangular
-                error("Unsupported inlet type: $(shape)")
+            shape_str = lowercase(String(item.type))
+            if shape_str != "rectangular"
+                error("Unsupported inlet type: $(shape_str)")
             end
             pos = parse_tuple3(item.position) ./ L0
             sz = parse_tuple2(item.size) ./ L0
@@ -306,9 +309,9 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     outlets = InletOutlet[]
     if haskey(data, :outlets)
         for item in data.outlets
-            shape = Symbol(item.type)
-            if shape != :rectangular
-                error("Unsupported outlet type: $(shape)")
+            shape_str = lowercase(String(item.type))
+            if shape_str != "rectangular"
+                error("Unsupported outlet type: $(shape_str)")
             end
             cond_str = lowercase(String(get(item, :condition, "outflow")))
             bctype = (cond_str == "dirichlet") ? Dirichlet : Outflow
@@ -335,30 +338,34 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     internal_bcs = InternalBoundary[]
     if haskey(data, :internal_boundaries)
         for item in data.internal_boundaries
-            shape = Symbol(item.type)
+            shape_str = lowercase(String(item.type))
             norm = parse_tuple3_int(item.normal)
             vel = parse_tuple3(item.velocity) ./ U0
-            if shape == :rectangular
+            if shape_str == "rectangular"
                 region = item.region
                 rmin = parse_tuple3(region.min) ./ L0
                 rmax = parse_tuple3(region.max) ./ L0
                 push!(internal_bcs, InternalBoundary(
-                    shape, rmin, rmax,
+                    :rectangular, rmin, rmax,
                     (0.0,0.0,0.0), 0.0, 0.0, :z,
                     norm, vel
                 ))
-            elseif shape == :cylindrical
+            elseif shape_str == "cylindrical"
                 cent = parse_tuple3(item.center) ./ L0
                 rad = Float64(item.radius) / L0
                 h = Float64(item.height) / L0
-                ax = Symbol(item.axis)
+                ax_str = lowercase(String(item.axis))
+                ax = if ax_str == "x"; :x
+                     elseif ax_str == "y"; :y
+                     else; :z
+                     end
                 push!(internal_bcs, InternalBoundary(
-                    shape, (0.0,0.0,0.0), (0.0,0.0,0.0),
+                    :cylindrical, (0.0,0.0,0.0), (0.0,0.0,0.0),
                     cent, rad, h, ax,
                     norm, vel
                 ))
             else
-                error("Unknown internal boundary type: $(shape)")
+                error("Unknown internal boundary type: $(shape_str)")
             end
         end
     end

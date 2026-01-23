@@ -86,6 +86,7 @@ end
 function compute_flux!(
     buffers::CFDBuffers,
     grid::GridData,
+    bc_set::BoundaryConditionSet,
     Cs::Float64,
     nu::Float64,
     par::String
@@ -100,7 +101,7 @@ function compute_flux!(
     
     # 3. Add Convection & Diffusion
     add_convection_flux!(buffers, grid, par)
-    add_diffusion_flux!(buffers, grid, par)
+    add_diffusion_flux!(buffers, grid, bc_set, par)
     
     # buffers.flux_u/v/w now holds H(u)
 end
@@ -173,9 +174,8 @@ function rk2_step!(
     # buffers.u is now u^{n+1/2} (approx)
     
     # 3. Stage 2: H(u^{n+1/2})
-    # Calc k4 = H(u3)
     # stored in buffers.flux_u/v/w
-    compute_flux!(buffers, grid, Cs, nu, par)
+    compute_flux!(buffers, grid, bc_set, Cs, nu, par)
     # flux is H(u^{n+1/2})
     
     # 4. Update u* = u^n + dt * flux
@@ -236,9 +236,8 @@ function rk4_step!(
     
     # --- Stage 1 ---
     # Calc k1 = H(u^n)
-    # Calc k4 = H(u3)
     # stored in buffers.flux_u/v/w
-    compute_flux!(buffers, grid, Cs, nu, par)
+    compute_flux!(buffers, grid, bc_set, Cs, nu, par)
     copy!(k1[1], buffers.flux_u)
     copy!(k1[2], buffers.flux_v)
     copy!(k1[3], buffers.flux_w)
@@ -253,9 +252,8 @@ function rk4_step!(
     
     # --- Stage 2 ---
     # Calc k2 = H(u1)
-    # Calc k4 = H(u3)
     # stored in buffers.flux_u/v/w
-    compute_flux!(buffers, grid, Cs, nu, par)
+    compute_flux!(buffers, grid, bc_set, Cs, nu, par)
     copy!(k2[1], buffers.flux_u)
     copy!(k2[2], buffers.flux_v)
     copy!(k2[3], buffers.flux_w)
@@ -269,9 +267,8 @@ function rk4_step!(
     
     # --- Stage 3 ---
     # Calc k3 = H(u2)
-    # Calc k4 = H(u3)
     # stored in buffers.flux_u/v/w
-    compute_flux!(buffers, grid, Cs, nu, par)
+    compute_flux!(buffers, grid, bc_set, Cs, nu, par)
     copy!(k3[1], buffers.flux_u)
     copy!(k3[2], buffers.flux_v)
     copy!(k3[3], buffers.flux_w)
@@ -285,7 +282,7 @@ function rk4_step!(
     
     # Calc k4 = H(u3)
     # stored in buffers.flux_u/v/w
-    compute_flux!(buffers, grid, Cs, nu, par)
+    compute_flux!(buffers, grid, bc_set, Cs, nu, par)
     
     # Final Accumulation
     # u* = u^n + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)

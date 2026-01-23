@@ -12,21 +12,16 @@
       "velocity": "outflow"
     },
     "y_min": {
-      "velocity": "periodic"
+      "velocity": "symmetric"
     },
     "y_max": {
-      "velocity": "periodic"
+      "velocity": "symmetric"
     },
     "z_min": {
       "velocity": "symmetric"
     },
     "z_max": {
-      "velocity": "dirichlet",
-      "value": [
-        0.0,
-        0.0,
-        0.0
-      ]
+      "velocity": "wall"
     }
   },
   "inlets": [],

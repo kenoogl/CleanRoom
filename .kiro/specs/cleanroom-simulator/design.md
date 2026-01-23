@@ -905,10 +905,11 @@ end
 | Requirements | 8.1, 8.2, 8.3, 8.4, 8.5, 8.6 |
 
 **Responsibilities & Constraints**
-- 外部境界6面: Dirichlet/Neumann/対流流出
-- 吹出口・吸込口: 座標指定速度
-- 部分境界: 矩形/円筒領域
+- 外部境界（標準）: wall / symmetric / periodic / outflow / SlidingWall
+- 外部境界（特殊）: Dirichlet / Neumann
+- 内部境界: 吹出口・吸込口、矩形/円筒領域
 - 優先順位: 内部境界 > 物体 > 外部境界
+- `wall`, `symmetric`, `SlidingWall` 時のゴーストセルマスク設定 (mask=0)
 
 **Dependencies**
 - Inbound: FractionalStep — BC適用呼び出し (P0)
@@ -925,6 +926,9 @@ end
     Neumann
     Outflow
     Periodic
+    Symmetric
+    Wall
+    SlidingWall
 end
 
 struct ExternalBC

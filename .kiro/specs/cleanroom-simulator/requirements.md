@@ -338,7 +338,7 @@ r0 = b - A x0
 **Objective:** As a シミュレーションエンジニア, I want 各種境界条件を設定できる, so that 実際のクリーンルーム環境を模擬できる
 
 #### Acceptance Criteria
-1. The Solver shall 外部境界（6面）に対してDirichlet/Neumann/対流流出/対称条件を速度に適用できる
+1. The Solver shall 外部境界（6面）に対して標準条件（wall, symmetric, periodic, outflow, SlidingWall）および特殊条件（neumann, dirichlet）を速度に適用できる
 2. The Solver shall 外部境界の圧力にNeumann条件を適用する
 3. The Solver shall 壁面にデフォルトで粘着条件（速度）とNeumann条件（圧力）を適用する
 4. When 吹出口・吸込口が指定された時, the Solver shall 座標指定で速度を設定する
@@ -349,9 +349,13 @@ r0 = b - A x0
 
 | 種別               | 速度                                            | 圧力    |
 | ------------------ | ----------------------------------------------- | ------- |
-| 外部境界（6面）    | Dirichlet / Neumann / 対流流出 / 周期 / 対称   | Neumann / 周期 |
-| 吹出口・吸込口     | 座標指定で速度指定                              | -       |
-| 部分境界（領域内） | 矩形/円筒領域、法線・速度指定                   | -       |
+| 外部境界（標準）    | 壁 (wall) / 対称 (symmetric) / 周期 (periodic) / 対流流出 (outflow) / SlidingWall | Neumann / 周期 |
+| 外部境界（特殊）    | Dirichlet / Neumann | Neumann |
+
+※ `wall`, `symmetric`, `SlidingWall` の場合、ゴーストセルのマスク値は `0`（固体）に設定される。これに伴い、拡散項の計算ではマスク値に基づき境界での勾配がデフォルトでゼロ（Neumann）となる。
+※ `wall` および `SlidingWall` においては、物理的なノンスリップ条件を満足するため、拡散項の計算後に壁面せん断流束（例：Z+面の場合 $2 \nu_{eff} (U_w - u) / \Delta z^2$）を明示的に加算して修正を行う。
+※ `SlidingWall` は境界速度を指定する壁面（例: キャビティ流れの上壁）に使用する。指定値は `value` で与える。
+※ JSON で指定されるすべての文字列パラメータ（境界条件名、時間スキーム、ソルバー名等）は、**読み取り時に大文字小文字を区別せず評価される**（Case-Insensitive）。
 
 ※ Neumann条件は境界面の法線方向勾配（∂φ/∂n）を指定する
 

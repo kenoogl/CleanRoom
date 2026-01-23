@@ -20,6 +20,7 @@ function compute_pseudo_velocity!(
     buffers::CFDBuffers,
     grid::GridData,
     dt::Float64,
+    bc_set::BoundaryConditionSet,
     par::String
 )
     # Initialize flux with 0
@@ -33,7 +34,7 @@ function compute_pseudo_velocity!(
     add_convection_flux!(buffers, grid, par)
     
     # 2. Diffusion
-    add_diffusion_flux!(buffers, grid, par)
+    add_diffusion_flux!(buffers, grid, bc_set, par)
     
     # 3. Update u*
     # u* = u + dt * flux
@@ -246,7 +247,7 @@ function fractional_step!(
     compute_turbulent_viscosity!(buffers.nu_t, buffers, grid, Cs, nu, par)
     
     # 2. Pseudo Velocity
-    compute_pseudo_velocity!(buffers, grid, dt, par)
+    compute_pseudo_velocity!(buffers, grid, dt, bc_set, par)
     
     # 2.5 Apply BCs to Pseudo Velocity
     apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, buffers.mask, bc_set, dt)
@@ -264,20 +265,8 @@ function fractional_step!(
     correct_velocity!(buffers, grid, dt, par)
     
     # 7. Apply BCs to Face Velocities
-    # セルフェイス速度への境界条件適用（特に周期境界）
-    y_periodic = bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
-    x_periodic = bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
-    z_periodic = bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
-    
-    if y_periodic
-        apply_periodic_face_velocity!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, :y)
-    end
-    if x_periodic
-        apply_periodic_face_velocity!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, :x)
-    end
-    if z_periodic
-        apply_periodic_face_velocity!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, :z)
-    end
+    # セルフェイス速度への境界条件適用（周期境界、対称境界など）
+    apply_face_velocity_bcs!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, buffers.mask, bc_set, dt)
     
     # 8. Apply BCs to Center Velocities
     apply_boundary_conditions!(buffers, grid, bc_set, dt, par)
