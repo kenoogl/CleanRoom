@@ -5,7 +5,7 @@ using ..Common
 using ..Grid
 using ..Fields: estimate_memory_size
 using ..TimeIntegration
-using ..BoundaryConditions
+using ..BoundaryConditions: Dirichlet, Neumann, Outflow, Periodic, Symmetric, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
 using ..PressureSolver
 using ..Visualization
 
@@ -261,6 +261,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                   elseif vel_str == "neumann"; Neumann
                   elseif vel_str == "outflow"; Outflow
                   elseif vel_str == "periodic"; Periodic
+                  elseif vel_str == "symmetric"; Symmetric
                   else; error("Unknown velocity BC type: $(vel_str)")
                   end
         val = (0.0, 0.0, 0.0)

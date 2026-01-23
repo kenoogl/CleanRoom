@@ -79,18 +79,29 @@ end
 
 function compute_divergence_max(buffers::CFDBuffers, grid::GridData)
     max_div = 0.0
-    dx, dy = grid.dx, grid.dy
+    max_i, max_j, max_k = 0, 0, 0
+    
+    # セルフェイス速度を使用（コンパクトステンシル）
+    u_face = buffers.u_face_x
+    v_face = buffers.v_face_y
+    w_face = buffers.w_face_z
+    
     @inbounds for k in 3:grid.mz-2
-        dz = grid.dz[k]
+        dz = grid.z_face[k+1] - grid.z_face[k]
         for j in 3:grid.my-2, i in 3:grid.mx-2
-            # Central diff for div u
-             div = (buffers.u[i+1, j, k] - buffers.u[i-1, j, k])/(2*dx) +
-                   (buffers.v[i, j+1, k] - buffers.v[i, j-1, k])/(2*dy) +
-                   (buffers.w[i, j, k+1] - buffers.w[i, j, k-1])/(2*dz) 
-             if abs(div) > max_div; max_div = abs(div); end
+            # コンパクトステンシル: (u_{i+1/2} - u_{i-1/2})/dx
+            div = (u_face[i+1, j, k] - u_face[i, j, k]) / grid.dx +
+                  (v_face[i, j+1, k] - v_face[i, j, k]) / grid.dy +
+                  (w_face[i, j, k+1] - w_face[i, j, k]) / dz
+            
+            abs_div = abs(div)
+            if abs_div > max_div
+                max_div = abs_div
+                max_i, max_j, max_k = i, j, k
+            end
         end
     end
-    return max_div
+    return (max_div, max_i, max_j, max_k)
 end
 
 function log_step!(

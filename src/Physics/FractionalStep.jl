@@ -123,7 +123,9 @@ end
 """
     correct_velocity!(buffers, grid, dt, par)
 
-速度補正。 u = u* - dt * ∇p
+速度補正。
+1. セルフェイス速度を圧力勾配で修正: u_face^{n+1} = u_face* - dt * ∇p
+2. セルセンター速度を両側の圧力勾配の平均で修正: u^{n+1} = u* - dt * avg(∇p)
 """
 function correct_velocity!(
     buffers::CFDBuffers,
@@ -133,70 +135,94 @@ function correct_velocity!(
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
+    p = buffers.p
+    mask = buffers.mask
     
-    @inbounds for k in 3:mz-2
-        # z-gradient needs dZ (distance between centers)
-        dZ_m = grid.z_center[k] - grid.z_center[k-1] # for i?
-        # Central difference for p at center?
-        # No, u is at center, p is at center.
-        # But u* was interpolated to faces to get Div.
-        # Now calculating New U at center.
-        # u^{n+1} = u* - dt * (p_{i+1} - p_{i-1})/(2dx) ?
-        # Standard projection:
-        # u = u* - dt * grad(p).
-        # Consistent with Div u* on faces -> p on centers -> grad p on faces?
-        # If we update Centered U:
-        # u_new = u*_center - dt * (p_{i+1}-p_{i-1})/(2dx) ?
-        # Or should we work on MAC grid?
-        # Codebase seems Colocated (all at center).
-        # Rhie-Chow interpolation prevents checkerboard.
-        # u*_face matches p-gradient at face. Corrects u_face -> u_face_new satisfying div=0.
-        # Then we need to reconstruct u_center_new from u_face_new?
-        # Or subtract "modified pressure gradient" from u*_center.
-        
-        # Simple Colocated (approx):
-        # u_new = u_star - dt * grad_p
-        # grad_p = (p_{i+1} - p_{i-1})/(2dx)
-        # This allows checkerboard.
-        # But `interpolate_to_faces` helps Div calculation stability.
-        # For U-correction, if we just use central diff, we get checkerboard.
-        # Design doc Task 11.2 "チェッカーボード不安定性の防止" linked to interpolate_to_faces.
-        # Does it imply we update Faces and then average back to center?
-        # Or we rely on the fact that Rhie-Chow modifies the face velocity.
-        # But we need Cell Center Velocity for next step.
-        
-        # Standard Rhie-Chow:
-        # u_face = avg(u) - dt*(grad P - avg(grad P)) + ...
-        # My `interpolate_to_faces` just averaged u*.
-        # It did NOT add the pressure smoothing term.
-        # If this simulator relies on naive approach + smoothing elsewhere, I'll follow simple gradient.
-        # But standard for this architecture is:
-        # u^{n+1}_i = u*_i - dt * (p_{i+1} - p_{i-1})/(2dx)
-        # This IS prone to checkerboard.
-        # Maybe `interpolate_to_faces` was intended to be the only place where strict conservation is enforced?
-        # But we carry `u` (center) to next step.
-        
-        # I will implement central difference correction.
-        # If instability occurs, I might need to implement filtering.
-        
-        dz_2 = grid.z_center[k+1] - grid.z_center[k-1] # Distance between k+1 and k-1 centers
-        
-        for j in 3:my-2
-            for i in 3:mx-2
-                if buffers.mask[i, j, k] == 0.0
-                    buffers.u[i, j, k] = 0.0; buffers.v[i, j, k] = 0.0; buffers.w[i, j, k] = 0.0
-                    continue
-                end
-                
-                dpdx = (buffers.p[i+1, j, k] - buffers.p[i-1, j, k]) / (2*dx)
-                dpdy = (buffers.p[i, j+1, k] - buffers.p[i, j-1, k]) / (2*dy)
-                dpdz = (buffers.p[i, j, k+1] - buffers.p[i, j, k-1]) / dz_2
-                
-                buffers.u[i, j, k] = buffers.u_star[i, j, k] - dt * dpdx
-                buffers.v[i, j, k] = buffers.v_star[i, j, k] - dt * dpdy
-                buffers.w[i, j, k] = buffers.w_star[i, j, k] - dt * dpdz
-            end
+    # 1. セルフェイス速度の修正
+    # X方向フェイス (i-1/2位置)
+    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-1
+        # 両側のセルが流体の場合のみ修正
+        m_left = mask[i-1, j, k]
+        m_right = mask[i, j, k]
+        if m_left > 0 && m_right > 0
+            dp_dx = (p[i, j, k] - p[i-1, j, k]) / dx
+            buffers.u_face_x[i, j, k] -= dt * dp_dx
+        else
+            # 壁面の場合はゼロ
+            buffers.u_face_x[i, j, k] = 0.0
         end
+    end
+    
+    # Y方向フェイス (j-1/2位置)
+    @inbounds for k in 3:mz-2, j in 3:my-1, i in 3:mx-2
+        m_left = mask[i, j-1, k]
+        m_right = mask[i, j, k]
+        if m_left > 0 && m_right > 0
+            dp_dy = (p[i, j, k] - p[i, j-1, k]) / dy
+            buffers.v_face_y[i, j, k] -= dt * dp_dy
+        else
+            buffers.v_face_y[i, j, k] = 0.0
+        end
+    end
+    
+    # Z方向フェイス (k-1/2位置)
+    @inbounds for k in 3:mz-1, j in 3:my-2, i in 3:mx-2
+        m_left = mask[i, j, k-1]
+        m_right = mask[i, j, k]
+        if m_left > 0 && m_right > 0
+            dz = grid.z_face[k] - grid.z_face[k-1]
+            dp_dz = (p[i, j, k] - p[i, j, k-1]) / dz
+            buffers.w_face_z[i, j, k] -= dt * dp_dz
+        else
+            buffers.w_face_z[i, j, k] = 0.0
+        end
+    end
+    
+    # 2. セルセンター速度の修正（両側フェイスの圧力勾配の平均）
+    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+        if mask[i, j, k] == 0.0
+            # 壁面セル
+            buffers.u[i, j, k] = 0.0
+            buffers.v[i, j, k] = 0.0
+            buffers.w[i, j, k] = 0.0
+            continue
+        end
+        
+        # X方向: 左右フェイスの圧力勾配を平均
+        m_left = mask[i-1, j, k]
+        m_right = mask[i+1, j, k]
+        
+        # 左フェイス (i-1/2) の圧力勾配（マスクでNeumann条件）
+        dp_dx_left = m_left * (p[i, j, k] - p[i-1, j, k]) / dx
+        # 右フェイス (i+1/2) の圧力勾配
+        dp_dx_right = m_right * (p[i+1, j, k] - p[i, j, k]) / dx
+        
+        # 平均勾配で修正
+        dp_dx_avg = 0.5 * (dp_dx_left + dp_dx_right)
+        buffers.u[i, j, k] = buffers.u_star[i, j, k] - dt * dp_dx_avg
+        
+        # Y方向
+        m_front = mask[i, j-1, k]
+        m_back = mask[i, j+1, k]
+        
+        dp_dy_front = m_front * (p[i, j, k] - p[i, j-1, k]) / dy
+        dp_dy_back = m_back * (p[i, j+1, k] - p[i, j, k]) / dy
+        
+        dp_dy_avg = 0.5 * (dp_dy_front + dp_dy_back)
+        buffers.v[i, j, k] = buffers.v_star[i, j, k] - dt * dp_dy_avg
+        
+        # Z方向
+        m_bottom = mask[i, j, k-1]
+        m_top = mask[i, j, k+1]
+        
+        dz_bottom = grid.z_face[k] - grid.z_face[k-1]
+        dz_top = grid.z_face[k+1] - grid.z_face[k]
+        
+        dp_dz_bottom = m_bottom * (p[i, j, k] - p[i, j, k-1]) / dz_bottom
+        dp_dz_top = m_top * (p[i, j, k+1] - p[i, j, k]) / dz_top
+        
+        dp_dz_avg = 0.5 * (dp_dz_bottom + dp_dz_top)
+        buffers.w[i, j, k] = buffers.w_star[i, j, k] - dt * dp_dz_avg
     end
 end
 
@@ -234,13 +260,29 @@ function fractional_step!(
     # 5. Poisson Solve
     converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par)
     
-    # 6. Correct Velocity
+    # 6. Correct Velocity (Face and Center)
     correct_velocity!(buffers, grid, dt, par)
     
-    # 7. Apply BCs
+    # 7. Apply BCs to Face Velocities
+    # セルフェイス速度への境界条件適用（特に周期境界）
+    y_periodic = bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
+    x_periodic = bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
+    z_periodic = bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+    
+    if y_periodic
+        apply_periodic_face_velocity!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, :y)
+    end
+    if x_periodic
+        apply_periodic_face_velocity!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, :x)
+    end
+    if z_periodic
+        apply_periodic_face_velocity!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, :z)
+    end
+    
+    # 8. Apply BCs to Center Velocities
     apply_boundary_conditions!(buffers, grid, bc_set, dt, par)
     
-    # 8. Update Time Average (Should be called by Main? Or here?)
+    # 9. Update Time Average (Should be called by Main? Or here?)
     # Design flow says "Update Time Average" is last step of FracStep flow.
     # But usually caller manages averaging start time.
     # I'll leave it to Main because it depends on Time.

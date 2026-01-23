@@ -7,13 +7,14 @@ using ..Fields
 export VelocityBCType, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
 export Dirichlet, Neumann, Outflow, Periodic
 export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
-export apply_periodic_velocity!, apply_periodic_pressure!
+export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!
 
 @enum VelocityBCType begin
     Dirichlet
     Neumann
     Outflow
     Periodic
+    Symmetric
 end
 
 struct ExternalBC
@@ -352,6 +353,91 @@ function apply_outflow_region!(
     end
 end
 
+"""
+    apply_symmetric_bc!(u, v, w, grid, face)
+
+対称境界条件を適用する。
+- 法線方向速度成分: 符号反転（u_n = 0）
+- 接線方向速度成分: ミラーリング（∂u_t/∂n = 0）
+"""
+function apply_symmetric_bc!(
+    u::Array{Float64, 3},
+    v::Array{Float64, 3},
+    w::Array{Float64, 3},
+    grid::GridData,
+    face::Symbol
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    
+    if face == :x_min
+        # 境界: i=3, ゴースト: i=1,2
+        # 法線方向: u (符号反転)
+        # 接線方向: v, w (ミラーリング)
+        @inbounds for k in 1:mz, j in 1:my
+            u[2, j, k] = -u[3, j, k]
+            u[1, j, k] = -u[4, j, k]
+            v[2, j, k] = v[3, j, k]
+            v[1, j, k] = v[4, j, k]
+            w[2, j, k] = w[3, j, k]
+            w[1, j, k] = w[4, j, k]
+        end
+    elseif face == :x_max
+        # 境界: i=mx-2, ゴースト: i=mx-1,mx
+        @inbounds for k in 1:mz, j in 1:my
+            u[mx-1, j, k] = -u[mx-2, j, k]
+            u[mx, j, k] = -u[mx-3, j, k]
+            v[mx-1, j, k] = v[mx-2, j, k]
+            v[mx, j, k] = v[mx-3, j, k]
+            w[mx-1, j, k] = w[mx-2, j, k]
+            w[mx, j, k] = w[mx-3, j, k]
+        end
+    elseif face == :y_min
+        # 境界: j=3, ゴースト: j=1,2
+        # 法線方向: v (符号反転)
+        # 接線方向: u, w (ミラーリング)
+        @inbounds for k in 1:mz, i in 1:mx
+            v[i, 2, k] = -v[i, 3, k]
+            v[i, 1, k] = -v[i, 4, k]
+            u[i, 2, k] = u[i, 3, k]
+            u[i, 1, k] = u[i, 4, k]
+            w[i, 2, k] = w[i, 3, k]
+            w[i, 1, k] = w[i, 4, k]
+        end
+    elseif face == :y_max
+        # 境界: j=my-2, ゴースト: j=my-1,my
+        @inbounds for k in 1:mz, i in 1:mx
+            v[i, my-1, k] = -v[i, my-2, k]
+            v[i, my, k] = -v[i, my-3, k]
+            u[i, my-1, k] = u[i, my-2, k]
+            u[i, my, k] = u[i, my-3, k]
+            w[i, my-1, k] = w[i, my-2, k]
+            w[i, my, k] = w[i, my-3, k]
+        end
+    elseif face == :z_min
+        # 境界: k=3, ゴースト: k=1,2
+        # 法線方向: w (符号反転)
+        # 接線方向: u, v (ミラーリング)
+        @inbounds for j in 1:my, i in 1:mx
+            w[i, j, 2] = -w[i, j, 3]
+            w[i, j, 1] = -w[i, j, 4]
+            u[i, j, 2] = u[i, j, 3]
+            u[i, j, 1] = u[i, j, 4]
+            v[i, j, 2] = v[i, j, 3]
+            v[i, j, 1] = v[i, j, 4]
+        end
+    elseif face == :z_max
+        # 境界: k=mz-2, ゴースト: k=mz-1,mz
+        @inbounds for j in 1:my, i in 1:mx
+            w[i, j, mz-1] = -w[i, j, mz-2]
+            w[i, j, mz] = -w[i, j, mz-3]
+            u[i, j, mz-1] = u[i, j, mz-2]
+            u[i, j, mz] = u[i, j, mz-3]
+            v[i, j, mz-1] = v[i, j, mz-2]
+            v[i, j, mz] = v[i, j, mz-3]
+        end
+    end
+end
+
 @inline function in_internal_cylinder(
     x::Float64,
     y::Float64,
@@ -594,6 +680,8 @@ function apply_velocity_bcs!(
              apply_outflow!(u, grid, face, dt, Uc)
              apply_outflow!(v, grid, face, dt, Uc)
              apply_outflow!(w, grid, face, dt, Uc)
+        elseif bc.velocity_type == Symmetric
+             apply_symmetric_bc!(u, v, w, grid, face)
         end
     end
 
@@ -793,6 +881,92 @@ function apply_periodic_pressure!(
     # Z-direction periodic
     if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :z)
+    end
+end
+
+"""
+    apply_periodic_face_velocity!(u_face, v_face, w_face, grid, axis)
+
+セルフェイス速度の周期境界条件を適用する。
+セルフェイス速度はインデックスがセルセンターと異なるため専用の処理が必要。
+"""
+function apply_periodic_face_velocity!(
+    u_face::Array{Float64, 3},
+    v_face::Array{Float64, 3},
+    w_face::Array{Float64, 3},
+    grid::GridData,
+    axis::Symbol
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    
+    if axis == :y
+        # Y方向周期境界
+        # u_face_x, w_face_z: セルセンターと同じインデックス
+        @inbounds for k in 1:mz, i in 1:mx
+            u_face[i, 1, k] = u_face[i, my-3, k]
+            u_face[i, 2, k] = u_face[i, my-2, k]
+            u_face[i, my-1, k] = u_face[i, 3, k]
+            u_face[i, my, k] = u_face[i, 4, k]
+            
+            w_face[i, 1, k] = w_face[i, my-3, k]
+            w_face[i, 2, k] = w_face[i, my-2, k]
+            w_face[i, my-1, k] = w_face[i, 3, k]
+            w_face[i, my, k] = w_face[i, 4, k]
+        end
+        
+        # v_face_y: j+1/2位置なのでインデックスがシフト
+        @inbounds for k in 1:mz, i in 1:mx
+            v_face[i, 1, k] = v_face[i, my-3, k]
+            v_face[i, 2, k] = v_face[i, my-2, k]
+            v_face[i, my-1, k] = v_face[i, 3, k]
+            v_face[i, my, k] = v_face[i, 4, k]
+        end
+        
+    elseif axis == :x
+        # X方向周期境界
+        # v_face_y, w_face_z: セルセンターと同じインデックス
+        @inbounds for k in 1:mz, j in 1:my
+            v_face[1, j, k] = v_face[mx-3, j, k]
+            v_face[2, j, k] = v_face[mx-2, j, k]
+            v_face[mx-1, j, k] = v_face[3, j, k]
+            v_face[mx, j, k] = v_face[4, j, k]
+            
+            w_face[1, j, k] = w_face[mx-3, j, k]
+            w_face[2, j, k] = w_face[mx-2, j, k]
+            w_face[mx-1, j, k] = w_face[3, j, k]
+            w_face[mx, j, k] = w_face[4, j, k]
+        end
+        
+        # u_face_x: i+1/2位置なのでインデックスがシフト
+        @inbounds for k in 1:mz, j in 1:my
+            u_face[1, j, k] = u_face[mx-3, j, k]
+            u_face[2, j, k] = u_face[mx-2, j, k]
+            u_face[mx-1, j, k] = u_face[3, j, k]
+            u_face[mx, j, k] = u_face[4, j, k]
+        end
+        
+    elseif axis == :z
+        # Z方向周期境界
+        # u_face_x, v_face_y: セルセンターと同じインデックス
+        @inbounds for j in 1:my, i in 1:mx
+            u_face[i, j, 1] = u_face[i, j, mz-3]
+            u_face[i, j, 2] = u_face[i, j, mz-2]
+            u_face[i, j, mz-1] = u_face[i, j, 3]
+            u_face[i, j, mz] = u_face[i, j, 4]
+            
+            v_face[i, j, 1] = v_face[i, j, mz-3]
+            v_face[i, j, 2] = v_face[i, j, mz-2]
+            v_face[i, j, mz-1] = v_face[i, j, 3]
+            v_face[i, j, mz] = v_face[i, j, 4]
+        end
+        
+        # w_face_z: k+1/2位置なのでインデックスがシフト
+        @inbounds for j in 1:my, i in 1:mx
+            w_face[i, j, 1] = w_face[i, j, mz-3]
+            w_face[i, j, 2] = w_face[i, j, mz-2]
+            w_face[i, j, mz-1] = w_face[i, j, 3]
+            w_face[i, j, mz] = w_face[i, j, 4]
+        end
     end
 end
 

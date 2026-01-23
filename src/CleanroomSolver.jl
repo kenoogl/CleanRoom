@@ -186,7 +186,7 @@ function run_simulation(param_file::String)
         time += dt_fixed
         
         u_max = compute_u_max(buffers, grid)
-        div = compute_divergence_max(buffers, grid)
+        div_max, div_i, div_j, div_k = compute_divergence_max(buffers, grid)
         
         # Compute velocity change for steady-state check
         # dU = sqrt( Σ( (u^n+1 - u^n)² + (v^n+1 - v^n)² + (w^n+1 - w^n)² ) )
@@ -203,12 +203,12 @@ function run_simulation(param_file::String)
         v_prev .= buffers.v
         w_prev .= buffers.w
         
-        mon_data = MonitorData(step, time, u_max, div, dU, pitr, pres)
+        mon_data = MonitorData(step, time, u_max, div_max, dU, pitr, pres)
         open(joinpath(out_dir, "history.txt"), "a") do io
             log_step!(mon_data, monitor_config; console_io=stdout, history_io=io)
         end
         
-        if check_divergence(div, monitor_config.div_threshold)
+        if check_divergence(div_max, monitor_config.div_threshold)
             println("Error: Divergence detected at step $step (Div=$div)")
             break
         end 

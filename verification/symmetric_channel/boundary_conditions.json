@@ -1,0 +1,35 @@
+{
+  "external_boundaries": {
+    "x_min": {
+      "velocity": "dirichlet",
+      "value": [
+        0.5,
+        0.0,
+        0.0
+      ]
+    },
+    "x_max": {
+      "velocity": "outflow"
+    },
+    "y_min": {
+      "velocity": "periodic"
+    },
+    "y_max": {
+      "velocity": "periodic"
+    },
+    "z_min": {
+      "velocity": "symmetric"
+    },
+    "z_max": {
+      "velocity": "dirichlet",
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "inlets": [],
+  "outlets": [],
+  "internal_boundaries": []
+}
