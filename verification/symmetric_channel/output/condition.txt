@@ -26,6 +26,17 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/symmetric_
   Max Steps:                      500
   Total Simulation Time:         6.25 [s]
 
+--- Boundary Conditions ---
+  x_min:     Inlet        (0.50, 0.00, 0.00)
+  x_max:     Outflow      
+  y_min:     Symmetric    
+  y_max:     Symmetric    
+  z_min:     Wall         
+  z_max:     Wall         
+  Inlets:                0
+  Outlets:               0
+  Internal Boundaries:   0
+
 --- Poisson Solver ---
   Solver:                RedBlackSOR
   Convergence Criteria:       1.0e-04
