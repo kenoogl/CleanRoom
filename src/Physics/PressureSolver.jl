@@ -136,8 +136,8 @@ function solve_poisson_sor!(
     
     while iter < config.max_iter
         iter += 1
-        total_res_sq = 0.0
-        # SOR Loop (Red/Black)
+        
+        # SOR Update Loop (Red/Black)
         for color in 0:1
             @floop for k in 3:mz-2, j in 3:my-2
                 # k-dependent geometry properties
@@ -148,18 +148,10 @@ function solve_poisson_sor!(
                 # Z coefficients
                 base_cz_p = (dx * dy) / dZ_p
                 base_cz_m = (dx * dy) / dZ_m
-                
-                # Y coefficients
                 base_cy = (dx * dz_k_val) / dy
-                
-                # X coefficients
                 base_cx = (dy * dz_k_val) / dx
-                
-                # Volume element
                 vol = dx * dy * dz_k_val
 
-                # Red/Black check
-                
                 @simd for i in (3 + (j + k + color + 1) % 2):2:mx-2
                     m0 = mask[i, j, k]
                     
@@ -194,23 +186,21 @@ function solve_poisson_sor!(
                     pp = p[i, j, k]
                     dp = ((ss - b_val) / dd - pp) * m0
                     p[i, j, k] = pp + config.omega * dp
-
-                    # Residual (post-update approximation or true residual?)
-                    # Use true residual |b - Ax| for convergence check
-                    r_val = (b_val - (ss - dd * pp)) * m0
-                    res_sq = r_val * r_val
-                    @reduce(local_res_sum = 0.0 + res_sq)
                 end
             end
-            total_res_sq += local_res_sum
         end
         
-        
+        # Apply BCs immediately after update to ensure ghost cells are consistent
         if !isnothing(bc_set)
             apply_pressure_bcs!(p, grid, mask, bc_set)
         end
         
-        residual = sqrt(total_res_sq) / res0
+        # Compute residual with consistent ghost cells
+        # Note: omega is not used in residual calculation (just normalization scale if needed, but we use true residual)
+        # We reuse compute_residual_sor which calculates true residual norm
+        current_res_norm = compute_residual_sor(p, rhs, mask, grid, config.omega)
+        residual = current_res_norm / res0
+        
         if residual < config.tol
             converged = true
             break
@@ -491,7 +481,8 @@ function compute_residual_sor(
              cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
 
         b_val = rhs[i, j, k] * vol
-        r_val = (b_val - (ss - dd * p[i, j, k])) * m0
+        # r = (-b_val) - (dd*p - ss) = -b_val - dd*p + ss
+        r_val = (-b_val - dd * p[i, j, k] + ss) * m0
         @reduce(res_sq = 0.0 + r_val * r_val)
     end
 

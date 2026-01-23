@@ -671,9 +671,10 @@ end
 **Responsibilities & Constraints**
 - Red-Black SOR法（必須）
 - CG/BiCGSTAB（オプション）
-- SOR残差を初期残差で正規化して収束判定（H2方式）
+- 反復ループ内での `apply_pressure_bcs!` 呼び出しによる境界条件（Neumann/Periodic等）のリアルタイム更新
+- 真の残差 $|b - Ax|$ に基づく収束判定
 - CG/BiCGSTABは前処理付き（Gauss-Seidel 5 sweep）共役勾配法で収束判定
-- 圧力平均値の引き戻し
+- 圧力平均値の引き戻し（外部基準点がない場合のみ）
 
 **Dependencies**
 - Inbound: FractionalStep — ポアソン解法呼び出し (P0)
@@ -711,7 +712,10 @@ function solve_poisson!(
     par::String
 )::Tuple{Bool, Int, Float64}
     # Returns: (収束フラグ, 反復回数, 最終残差)
-    # Postconditions: buffers.p に圧力場を格納、平均値を引き戻し
+    # Postconditions: 
+    #   1. 反復計算（apply_pressure_bcs! をループ内で適宜呼び出し）
+    #   2. has_reference フラグ（Outflow等の有無）に基づき、必要な場合のみ平均値を引き戻し
+    #   3. buffers.p に最終的な圧力場を格納
 end
 ```
 
