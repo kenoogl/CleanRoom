@@ -7,7 +7,7 @@ using ..Fields
 export VelocityBCType, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
 export Dirichlet, Neumann, Outflow, Periodic
 export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
-export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!, apply_face_velocity_bcs!, apply_boundary_mask!
+export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!, apply_face_velocity_bcs!, apply_boundary_mask!, apply_pressure_bcs!
 
 @enum VelocityBCType begin
     Dirichlet
@@ -824,22 +824,34 @@ function apply_pressure_bcs!(
     if bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :y)
     else
-        set_boundary_value!(p, grid, mask, :y_min, 0.0, Neumann)
-        set_boundary_value!(p, grid, mask, :y_max, 0.0, Neumann)
+        # y_min
+        p_type_min = (bc_set.y_min.velocity_type == Outflow) ? Dirichlet : Neumann
+        set_boundary_value!(p, grid, mask, :y_min, 0.0, p_type_min)
+        # y_max
+        p_type_max = (bc_set.y_max.velocity_type == Outflow) ? Dirichlet : Neumann
+        set_boundary_value!(p, grid, mask, :y_max, 0.0, p_type_max)
     end
     # X-direction
     if bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :x)
     else
-        set_boundary_value!(p, grid, mask, :x_min, 0.0, Neumann)
-        set_boundary_value!(p, grid, mask, :x_max, 0.0, Neumann)
+        # x_min
+        p_type_min = (bc_set.x_min.velocity_type == Outflow) ? Dirichlet : Neumann
+        set_boundary_value!(p, grid, mask, :x_min, 0.0, p_type_min)
+        # x_max
+        p_type_max = (bc_set.x_max.velocity_type == Outflow) ? Dirichlet : Neumann
+        set_boundary_value!(p, grid, mask, :x_max, 0.0, p_type_max)
     end
     # Z-direction
     if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :z)
     else
-        set_boundary_value!(p, grid, mask, :z_min, 0.0, Neumann)
-        set_boundary_value!(p, grid, mask, :z_max, 0.0, Neumann)
+        # z_min
+        p_type_min = (bc_set.z_min.velocity_type == Outflow) ? Dirichlet : Neumann
+        set_boundary_value!(p, grid, mask, :z_min, 0.0, p_type_min)
+        # z_max
+        p_type_max = (bc_set.z_max.velocity_type == Outflow) ? Dirichlet : Neumann
+        set_boundary_value!(p, grid, mask, :z_max, 0.0, p_type_max)
     end
 end
 

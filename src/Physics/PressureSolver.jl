@@ -59,21 +59,34 @@ function solve_poisson!(
     
     converged, iter, residual = result
 
-    # Mean pressure subtraction
-    mx, my, mz = grid.mx, grid.my, grid.mz
-    mask = buffers.mask
-    p = buffers.p
-    
-    sum_p = 0.0
-    count = 0.0
-    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-        sum_p += p[i, j, k] * mask[i, j, k]
-        count += mask[i, j, k]
+    # Mean pressure subtraction (only for purely Neumann/Periodic systems)
+    # Check if there's any Dirichlet or Outflow boundary (which provides a reference)
+    has_reference = if !isnothing(bc_set)
+        (bc_set.x_min.velocity_type == Outflow || bc_set.x_max.velocity_type == Outflow ||
+         bc_set.y_min.velocity_type == Outflow || bc_set.y_max.velocity_type == Outflow ||
+         bc_set.z_min.velocity_type == Outflow || bc_set.z_max.velocity_type == Outflow)
+    else
+        false
     end
-    
-    avg_p = sum_p / count
-    @inbounds for k in 1:mz, j in 1:my, i in 1:mx
-        p[i, j, k] -= avg_p
+
+    if !has_reference
+        mx, my, mz = grid.mx, grid.my, grid.mz
+        mask = buffers.mask
+        p = buffers.p
+        
+        sum_p = 0.0
+        count = 0.0
+        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+            sum_p += p[i, j, k] * mask[i, j, k]
+            count += mask[i, j, k]
+        end
+        
+        if count > 0
+            avg_p = sum_p / count
+            @inbounds for k in 1:mz, j in 1:my, i in 1:mx
+                p[i, j, k] -= avg_p
+            end
+        end
     end
 
     if !converged && config.on_divergence == WarnContinue
@@ -180,14 +193,13 @@ function solve_poisson_sor!(
                     # Update
                     pp = p[i, j, k]
                     dp = ((ss - b_val) / dd - pp) * m0
-                    p_new = pp + config.omega * dp
+                    p[i, j, k] = pp + config.omega * dp
 
-                    sum_cond_minus = cond_xm + cond_ym + cond_zm
-                    r_val = (dd + config.omega * sum_cond_minus) * dp / config.omega
+                    # Residual (post-update approximation or true residual?)
+                    # Use true residual |b - Ax| for convergence check
+                    r_val = (b_val - (ss - dd * pp)) * m0
                     res_sq = r_val * r_val
                     @reduce(local_res_sum = 0.0 + res_sq)
-                    
-                    p[i, j, k] = p_new
                 end
             end
             total_res_sq += local_res_sum
@@ -195,7 +207,7 @@ function solve_poisson_sor!(
         
         
         if !isnothing(bc_set)
-            apply_periodic_pressure!(p, grid, bc_set)
+            apply_pressure_bcs!(p, grid, mask, bc_set)
         end
         
         residual = sqrt(total_res_sq) / res0
@@ -310,7 +322,7 @@ function solve_poisson_cg!(
     end
     
     if !isnothing(bc_set)
-        apply_periodic_pressure!(p, grid, bc_set)
+        apply_pressure_bcs!(p, grid, mask, bc_set)
     end
     
     return (converged, iter, residual)
@@ -479,9 +491,7 @@ function compute_residual_sor(
              cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
 
         b_val = rhs[i, j, k] * vol
-        dp = ((ss - b_val) / dd - p[i, j, k]) * m0
-        sum_cond_minus = cond_xm + cond_ym + cond_zm
-        r_val = (dd + omega * sum_cond_minus) * dp / omega
+        r_val = (b_val - (ss - dd * p[i, j, k])) * m0
         @reduce(res_sq = 0.0 + r_val * r_val)
     end
 
