@@ -100,9 +100,20 @@ function log_step!(
     history_io::Union{IO, Nothing}=nothing
 )
     step_width = max(config.step_digits, 4)
+    
+    # Console output
     if console_io !== nothing && (data.step % config.console_interval == 0 || data.step == 1)
-        @printf(console_io, "Step %*d Time %11.4e Umax %.3e Div %.3e dU %.3e ItrP %4d Pres %.3e\n",
-            step_width, data.step, data.time, data.u_max, data.div_max, data.dU, data.pressure_itr, data.pressure_residual)
+        if data.step == 1
+            # Print header on first step
+            # Column widths must match the data format exactly:
+            # Step: step_width, Time: 14, Umax: 12, Div: 12, dU: 12, ItrP: 5, ResP: 13
+            @printf(console_io, "%*s %14s %12s %12s %12s %5s %13s\n",
+                step_width, "Step", "Time", "Umax", "Div", "dU", "ItrP", "ResP")
+        end
+        # Print data values only
+        @printf(console_io, "%*d %14.6e %12.4e %12.4e %12.4e %5d %13.5e\n",
+            step_width, data.step, data.time, data.u_max, data.div_max, 
+            data.dU, data.pressure_itr, data.pressure_residual)
     end
 
     if history_io !== nothing && (data.step % config.history_interval == 0 || data.step == 1)

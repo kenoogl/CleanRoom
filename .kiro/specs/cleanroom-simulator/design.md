@@ -671,7 +671,8 @@ end
 **Responsibilities & Constraints**
 - Red-Black SOR法（必須）
 - CG/BiCGSTAB（オプション）
-- 相対残差ノルムで収束判定
+- SOR残差を初期残差で正規化して収束判定（H2方式）
+- CG/BiCGSTABは前処理付き（Gauss-Seidel 5 sweep）共役勾配法で収束判定
 - 圧力平均値の引き戻し
 
 **Dependencies**

@@ -16,20 +16,29 @@ WENO3再構成（左側 u^{-}_{i+1/2}）。
     dx_im1::Float64, dx_i::Float64, dx_ip1::Float64,
     epsilon::Float64
 )
-    # 簡易実装: 等間隔係数を使用
-    p0 = -0.5*u_im1 + 1.5*u_i
-    p1 = 0.5*u_i + 0.5*u_ip1
-    
-    beta0 = (u_i - u_im1)^2
-    beta1 = (u_ip1 - u_i)^2
-    
-    alpha0 = (1.0/3.0) / (epsilon + beta0)^2
-    alpha1 = (2.0/3.0) / (epsilon + beta1)^2
-    
+    # 非等間隔格子対応のWENO3再構成（requirements.md準拠）
+    dx_ref = (dx_im1 + dx_i + dx_ip1) / 3.0
+    dx_c_im1 = 0.5 * (dx_im1 + dx_i)
+    dx_c_i = 0.5 * (dx_i + dx_ip1)
+
+    q0 = (-dx_i / (dx_im1 + dx_i)) * u_im1 +
+         ((dx_im1 + 2.0 * dx_i) / (dx_im1 + dx_i)) * u_i
+    q1 = (dx_ip1 / (dx_i + dx_ip1)) * u_i +
+         (dx_i / (dx_i + dx_ip1)) * u_ip1
+
+    d0 = dx_i / (dx_im1 + 2.0 * dx_i + dx_ip1)
+    d1 = (dx_im1 + dx_i + dx_ip1) / (dx_im1 + 2.0 * dx_i + dx_ip1)
+
+    beta0 = ((u_i - u_im1) / dx_c_im1)^2 * dx_ref^2
+    beta1 = ((u_ip1 - u_i) / dx_c_i)^2 * dx_ref^2
+
+    alpha0 = d0 / (epsilon + beta0)^2
+    alpha1 = d1 / (epsilon + beta1)^2
+
     omega0 = alpha0 / (alpha0 + alpha1)
     omega1 = alpha1 / (alpha0 + alpha1)
-    
-    return omega0 * p0 + omega1 * p1
+
+    return omega0 * q0 + omega1 * q1
 end
 
 """
@@ -43,12 +52,21 @@ function add_convection_flux!(
     par::String
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
+
+    alpha_x = 0.0
+    alpha_y = 0.0
+    alpha_z = 0.0
+    @inbounds for idx in eachindex(buffers.u)
+        alpha_x = max(alpha_x, abs(buffers.u[idx]))
+        alpha_y = max(alpha_y, abs(buffers.v[idx]))
+        alpha_z = max(alpha_z, abs(buffers.w[idx]))
+    end
     
     # --- Advection of U ---
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 2:mx-2
         # Flux F = u*u in x
         u_i, u_ip1 = buffers.u[i, j, k], buffers.u[i+1, j, k]
-        alpha = max(abs(u_i), abs(u_ip1))
+        alpha = alpha_x
         
         fp(u) = 0.5 * (u*u + alpha*u)
         fm(u) = 0.5 * (u*u - alpha*u)
@@ -64,7 +82,7 @@ function add_convection_flux!(
     @inbounds for k in 3:mz-2, j in 2:my-2, i in 3:mx-2
         # Flux F = v*u in y
         v_j, v_jp1 = buffers.v[i, j, k], buffers.v[i, j+1, k]
-        alpha = max(abs(v_j), abs(v_jp1))
+        alpha = alpha_y
         
         fp_y(u, v) = 0.5 * (v*u + alpha*u)
         fm_y(u, v) = 0.5 * (v*u - alpha*u)
@@ -80,7 +98,7 @@ function add_convection_flux!(
     @inbounds for k in 2:mz-2, j in 3:my-2, i in 3:mx-2
         # Flux F = w*u in z
         w_k, w_kp1 = buffers.w[i, j, k], buffers.w[i, j, k+1]
-        alpha = max(abs(w_k), abs(w_kp1))
+        alpha = alpha_z
         
         fp_z(u, w) = 0.5 * (w*u + alpha*u)
         fm_z(u, w) = 0.5 * (w*u - alpha*u)
@@ -99,7 +117,7 @@ function add_convection_flux!(
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 2:mx-2
         # F = u*v in x
         u_i, u_ip1 = buffers.u[i, j, k], buffers.u[i+1, j, k]
-        alpha = max(abs(u_i), abs(u_ip1))
+        alpha = alpha_x
         fp_x(v, u) = 0.5 * (u*v + alpha*v)
         fm_x(v, u) = 0.5 * (u*v - alpha*v)
         
@@ -114,7 +132,7 @@ function add_convection_flux!(
     @inbounds for k in 3:mz-2, j in 2:my-2, i in 3:mx-2
         # F = v*v in y
         v_j, v_jp1 = buffers.v[i, j, k], buffers.v[i, j+1, k]
-        alpha = max(abs(v_j), abs(v_jp1))
+        alpha = alpha_y
         fp(v) = 0.5 * (v*v + alpha*v)
         fm(v) = 0.5 * (v*v - alpha*v)
         
@@ -129,7 +147,7 @@ function add_convection_flux!(
     @inbounds for k in 2:mz-2, j in 3:my-2, i in 3:mx-2
         # F = w*v in z
         w_k, w_kp1 = buffers.w[i, j, k], buffers.w[i, j, k+1]
-        alpha = max(abs(w_k), abs(w_kp1))
+        alpha = alpha_z
         
         fp_z(v, w) = 0.5 * (w*v + alpha*v)
         fm_z(v, w) = 0.5 * (w*v - alpha*v)
@@ -148,7 +166,7 @@ function add_convection_flux!(
        @inbounds for k in 3:mz-2, j in 3:my-2, i in 2:mx-2
         # F = u*w in x
         u_i, u_ip1 = buffers.u[i, j, k], buffers.u[i+1, j, k]
-        alpha = max(abs(u_i), abs(u_ip1))
+        alpha = alpha_x
         
         fp_x(w, u) = 0.5 * (u*w + alpha*w)
         fm_x(w, u) = 0.5 * (u*w - alpha*w)
@@ -164,7 +182,7 @@ function add_convection_flux!(
     @inbounds for k in 3:mz-2, j in 2:my-2, i in 3:mx-2
         # F = v*w in y
         v_j, v_jp1 = buffers.v[i, j, k], buffers.v[i, j+1, k]
-        alpha = max(abs(v_j), abs(v_jp1))
+        alpha = alpha_y
         
         fp_y(w, v) = 0.5 * (v*w + alpha*w)
         fm_y(w, v) = 0.5 * (v*w - alpha*w)
@@ -180,7 +198,7 @@ function add_convection_flux!(
     @inbounds for k in 2:mz-2, j in 3:my-2, i in 3:mx-2
         # F = w*w in z
         w_k, w_kp1 = buffers.w[i, j, k], buffers.w[i, j, k+1]
-        alpha = max(abs(w_k), abs(w_kp1))
+        alpha = alpha_z
         
         fp(w) = 0.5 * (w*w + alpha*w)
         fm(w) = 0.5 * (w*w - alpha*w)

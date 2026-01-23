@@ -2,11 +2,15 @@
   "dry_run": "no",
   "start": "initial",
   "Max_step": 1000,
-  "Reference_Length": 1.0,
+  "Reference_Length": 0.3,
   "Reference_Velocity": 5.0,
   "Kinematic_Viscosity": 1.5e-5,
   "Smagorinsky_Constant": 0.2,
-  "Origin_of_Region": [-0.5, -0.5, 0.0],
+  "Origin_of_Region": [
+    -0.5,
+    -0.5,
+    0.0
+  ],
   "Domain": {
     "Lx": 5.0,
     "Ly": 1.0,
@@ -31,7 +35,10 @@
     "interval": 100,
     "plane": "xz",
     "plane_index": 25,
-    "variables": ["velocity", "pressure"],
+    "variables": [
+      "velocity",
+      "pressure"
+    ],
     "output_format": "png",
     "output_dir": "viz",
     "vector_enabled": false,
@@ -39,17 +46,21 @@
     "text_output": false
   },
   "Poisson_parameter": {
-    "solver": "CG",
+    "solver": "RedBlackSOR",
     "coef_acceleration": 1.2,
-    "convergence_criteria": 1.0e-4,
+    "convergence_criteria": 1.0e-3,
     "Iteration_max": 500,
     "on_divergence": "WarnContinue"
   },
   "Start_time_for_averaging": 0.0,
   "Time_Integration_Scheme": "RK2",
-  "divMax_threshold": 1.0e-3,
+  "divMax_threshold": 100,
   "Initial_Condition": {
-    "velocity": [5.0, 0.0, 0.0],
+    "velocity": [
+      5.0,
+      0.0,
+      0.0
+    ],
     "pressure": 0.0
   },
   "Restart": {

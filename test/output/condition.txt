@@ -1,0 +1,38 @@
+=== Calculation Conditions ===
+Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/test/params.json
+
+--- Physical Parameters ---
+  Reference Length L0:              1 [m]    
+  Reference Velocity U0:            1 [m/s]  
+  Kinematic Viscosity ν:   1.0000e-02 [m²/s] 
+  Reynolds Number Re:             100        
+  Reference Time T0:                1 [s]    
+
+--- Grid Parameters ---
+  Grid Size (Nx,Ny,Nz):  (10, 10, 10)
+  Domain Lx:                        1 [m]
+  Domain Ly:                        1 [m]
+  Domain Lz:                        1 [m]
+  Cell Δx:                        0.1 [m]
+  Cell Δy:                        0.1 [m]
+  Cell Δz:                        0.1 [m] (min)
+                                  0.1 [m] (max)
+
+--- Time Integration ---
+  Time Scheme:           Euler
+  Courant Number:                 0.5
+  Fixed Time Step Δt*:           0.05 (dimensionless)
+  Fixed Time Step Δt:            0.05 [s]
+  Max Steps:                       10
+  Total Simulation Time:          0.5 [s]
+
+--- Poisson Solver ---
+  Solver:                RedBlackSOR
+  Convergence Criteria:       1.0e-05
+  Max Iterations:                 100
+
+--- Output Intervals ---
+  Display:                      1 steps
+  History:                      1 steps
+  Instantaneous:                0 steps
+  Checkpoint:                   0 steps

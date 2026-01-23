@@ -28,7 +28,7 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
 
 --- Poisson Solver ---
   Solver:                RedBlackSOR
-  Convergence Criteria:       1.0e-05
+  Convergence Criteria:       1.0e-03
   Max Iterations:                1000
 
 --- Output Intervals ---

@@ -278,8 +278,9 @@ u⁻_{i+1/2} = ω₀·q₀ + ω₁·q₁
 2. Where CG法が選択された場合, the Solver shall 共役勾配法を適用する（オプション）
 3. Where BiCGSTAB法が選択された場合, the Solver shall BiCGSTAB法を適用する（オプション）
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
-5. The Solver shall 残差を相対残差ノルム ||b - Ax|| / ||b|| で評価する
-6. The Solver shall 収束後に圧力場の空間平均値を計算し、全セルから平均値を減算する（ドリフト防止）
+5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
+6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 5 sweep）を適用する
+7. The Solver shall 収束後に圧力場の空間平均値を計算し、全セルから平均値を減算する（ドリフト防止）
 
 #### 圧力平均値の引き戻し
 
@@ -298,11 +299,27 @@ p_i = p_i - p_avg        # 全流体セルから平均値を減算
 線形方程式 Ax = b に対して、残差を以下で定義する：
 
 ```
-残差 = ||b - Ax|| / ||b||
+SOR残差 = ||r||₂ / Res0
+CG/BiCGSTAB残差 = ||r||₂ / ||r0||₂
 ```
 
-※ ||・|| はL2ノルム（ユークリッドノルム）
-※ ||b|| = 0 の場合はエラー処理（右辺ベクトルがゼロの異常ケース）
+**SOR残差（H2方式）**
+
+```
+dp = ( (ss - b) / dd - p )          # SOR更新量
+r  = (dd + ω*(cond_xm+cond_ym+cond_zm)) * dp / ω
+Res0 = ||r||₂（初期反復時）
+```
+
+- Res0 = 0 の場合は Res0 = 1 に置き換える
+
+**CG/BiCGSTAB残差**
+
+```
+r0 = b - A x0
+```
+
+- r0 = 0 の場合は収束済みとして終了
 
 ### Requirement 8: 境界条件
 **Objective:** As a シミュレーションエンジニア, I want 各種境界条件を設定できる, so that 実際のクリーンルーム環境を模擬できる

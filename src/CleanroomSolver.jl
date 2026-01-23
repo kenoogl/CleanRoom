@@ -63,6 +63,25 @@ function run_simulation(param_file::String)
     if !mem_ok && !sim_params.dry_run
         error("Insufficient memory.")
     end
+
+    nu_lam = 1.0 / dim_params.Re
+    u0_nd = sim_params.initial_condition.velocity[1] / dim_params.U0
+    v0_nd = sim_params.initial_condition.velocity[2] / dim_params.U0
+    w0_nd = sim_params.initial_condition.velocity[3] / dim_params.U0
+    U_ref = sqrt(u0_nd^2 + v0_nd^2 + w0_nd^2)
+    dt_fixed = compute_dt(grid, sim_params.courant_number, nu_lam, U_ref)
+
+    dx_min = min(grid.dx, grid.dy)
+    if !isempty(grid.dz)
+        dx_min = min(dx_min, minimum(grid.dz))
+    end
+    diff_num = nu_lam * dt_fixed / (dx_min^2)
+    if diff_num >= 0.5
+        println("Warning: Diffusion number D=$(diff_num) >= 0.5")
+        if !sim_params.dry_run
+            error("Diffusion number stability condition violated.")
+        end
+    end
     
     if sim_params.dry_run
         println("Dry run completed.")
@@ -140,8 +159,6 @@ function run_simulation(param_file::String)
     init_monitor(monitor_config, joinpath(out_dir, "history.txt"))
     
     # Calculate fixed time step (dimensionless)
-    nu_lam = 1.0 / dim_params.Re
-    dt_fixed = compute_dt(buffers, grid, sim_params.courant_number, nu_lam)
     println("Fixed time step (dimensionless): Δt* = $dt_fixed")
     
     # Output calculation conditions to condition.txt

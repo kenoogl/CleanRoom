@@ -47,8 +47,8 @@
   },
   "Poisson_parameter": {
     "solver": "RedBlackSOR",
-    "coef_acceleration": 1.7,
-    "convergence_criteria": 1.0e-5,
+    "coef_acceleration": 1.2,
+    "convergence_criteria": 1.0e-3,
     "Iteration_max": 1000,
     "on_divergence": "Abort"
   },

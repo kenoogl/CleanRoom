@@ -11,6 +11,8 @@ export SolverType, DivergenceAction, PoissonConfig
 export RedBlackSOR, CG, BiCGSTAB, WarnContinue, Abort
 export solve_poisson!
 
+const PRECONDITIONER_SWEEPS = 5
+
 @enum SolverType begin
     RedBlackSOR
     CG
@@ -44,7 +46,6 @@ function solve_poisson!(
     bc_set,  # Union{Nothing, BoundaryConditionSet} - for periodic BC
     par::String
 )::Tuple{Bool, Int, Float64}
-    
     # Solver dispatch
     result = if config.solver == RedBlackSOR
         solve_poisson_sor!(buffers, grid, config, bc_set, par)
@@ -58,26 +59,21 @@ function solve_poisson!(
     
     converged, iter, residual = result
 
-    # Mean pressure subtraction (Pinning) - Common for all solvers
-    # Applied after solving to ensure mean pressure is zero
+    # Mean pressure subtraction
     mx, my, mz = grid.mx, grid.my, grid.mz
     mask = buffers.mask
     p = buffers.p
     
     sum_p = 0.0
-    count = 0
+    count = 0.0
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-        if mask[i, j, k] > 0
-            sum_p += p[i, j, k]
-            count += 1
-        end
+        sum_p += p[i, j, k] * mask[i, j, k]
+        count += mask[i, j, k]
     end
     
-    if count > 0
-        avg_p = sum_p / count
-        @inbounds for k in 1:mz, j in 1:my, i in 1:mx # Subtract everywhere
-             p[i, j, k] -= avg_p
-        end
+    avg_p = sum_p / count
+    @inbounds for k in 1:mz, j in 1:my, i in 1:mx
+        p[i, j, k] -= avg_p
     end
 
     if !converged && config.on_divergence == WarnContinue
@@ -112,6 +108,11 @@ function solve_poisson_sor!(
     iter = 0
     residual = 0.0
     converged = false
+
+    res0 = compute_residual_sor(p, rhs, mask, grid, config.omega)
+    if res0 == 0.0
+        res0 = 1.0
+    end
     
     dx = grid.dx
     dy = grid.dy
@@ -123,7 +124,6 @@ function solve_poisson_sor!(
     while iter < config.max_iter
         iter += 1
         total_res_sq = 0.0
-        
         # SOR Loop (Red/Black)
         for color in 0:1
             @floop for k in 3:mz-2, j in 3:my-2
@@ -181,28 +181,24 @@ function solve_poisson_sor!(
                     pp = p[i, j, k]
                     dp = ((ss - b_val) / dd - pp) * m0
                     p_new = pp + config.omega * dp
-                    
-                    # Residual
-                    # NonUniform.jl: r = (dd + ω * (cond_xm + cond_ym + cond_zm)) * dp / ω
+
                     sum_cond_minus = cond_xm + cond_ym + cond_zm
                     r_val = (dd + config.omega * sum_cond_minus) * dp / config.omega
-                    
                     res_sq = r_val * r_val
                     @reduce(local_res_sum = 0.0 + res_sq)
                     
                     p[i, j, k] = p_new
                 end
             end
-            
             total_res_sq += local_res_sum
         end
         
-        # Apply periodic BC
+        
         if !isnothing(bc_set)
             apply_periodic_pressure!(p, grid, bc_set)
         end
         
-        residual = sqrt(total_res_sq)
+        residual = sqrt(total_res_sq) / res0
         if residual < config.tol
             converged = true
             break
@@ -233,29 +229,32 @@ function solve_poisson_cg!(
     rhs = buffers.rhs
     mask = buffers.mask
     
-    # Reuse flux buffers for CG work vectors
-    r = buffers.flux_u    # Residual
-    pk = buffers.flux_v   # Search direction
-    q = buffers.flux_w    # A * p (work vector)
+    # Reuse buffers for CG work vectors
+    r = buffers.flux_u       # Residual
+    pk = buffers.flux_v      # Search direction
+    q = buffers.flux_w       # A * p (work vector)
+    z = buffers.nu_t         # Preconditioned residual (temporary)
     
     # 1. Compute initial residual: r = b - Ap
     res0 = calc_residual_cg!(r, p, rhs, mask, grid, par)
-    
-    if res0 < 1e-14
-        return (true, 0, res0)
+    if res0 == 0.0
+        return (true, 0, 0.0)
     end
     
-    # 2. p = r (no preconditioner)
+    # 2. Preconditioner: z = M^-1 r (Gauss-Seidel)
+    apply_preconditioner!(z, r, mask, grid)
+    
+    # 3. p = z
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-        pk[i, j, k] = r[i, j, k]
+        pk[i, j, k] = z[i, j, k]
     end
     
-    # 3. rho_old = r·r
-    rho_old = dot_self_cg(r, mask, grid, par)
+    # 4. rho_old = r·z
+    rho_old = dot_product_cg(r, z, mask, grid, par)
     
     converged = false
     iter = 0
-    residual = res0
+    residual = 1.0
     
     for itr in 1:config.max_iter
         iter = itr
@@ -289,25 +288,27 @@ function solve_poisson_cg!(
             break
         end
         
-        # 9. rho_new = r·r
-        rho_new = res_sq
+        # 9. Preconditioner: z = M^-1 r
+        apply_preconditioner!(z, r, mask, grid)
+        
+        # 10. rho_new = r·z
+        rho_new = dot_product_cg(r, z, mask, grid, par)
         
         if abs(rho_new) < 1e-30
             break
         end
         
-        # 10. beta = rho_new / rho_old
+        # 11. beta = rho_new / rho_old
         beta = rho_new / rho_old
         
-        # 11. p = r + beta * p
+        # 12. p = z + beta * p
         @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-            pk[i, j, k] = r[i, j, k] + beta * pk[i, j, k]
+            pk[i, j, k] = z[i, j, k] + beta * pk[i, j, k]
         end
         
         rho_old = rho_new
     end
     
-    # Apply periodic BC
     if !isnothing(bc_set)
         apply_periodic_pressure!(p, grid, bc_set)
     end
@@ -364,8 +365,8 @@ function calc_laplacian_cg!(
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                  cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
             
-            # Ap = A * p = -(ss - dd * p) = dd * p - ss
-            Ap[i, j, k] = (dd * p[i, j, k] - ss) * m0
+            # Ap = A * p = (ss - dd * p)
+            Ap[i, j, k] = (ss - dd * p[i, j, k]) * m0
         end
     end
 end
@@ -425,20 +426,117 @@ function calc_residual_cg!(
             
             b_val = rhs[i, j, k] * vol
             
-            # r = b - Ap = b - (dd * p - ss) = b - dd * p + ss
-            # Note: Our discretization is A*p = -∇²p, so r = b - A*p
-            # Wait, need to carefully match sign convention with SOR.
-            # In SOR: ss - b_val = dd * p  =>  (ss - b_val) / dd = p
-            # So: A*p = dd*p - ss  (implicitly)
-            # RHS convention: rhs = ∇·u* / dt, so b = rhs * vol
-            # r = b - A*p = b - (dd*p - ss) = b + ss - dd*p
-            r_val = (b_val + ss - dd * p[i, j, k]) * m0
+            # In SOR: ss - b_val = dd * p  ->  ss - dd * p = b_val
+            # A*p = ss - dd * p, r = b - A*p
+            r_val = (b_val - ss + dd * p[i, j, k]) * m0
             r[i, j, k] = r_val
             res_sq += r_val * r_val
         end
     end
     
     return sqrt(res_sq)
+end
+
+"""
+    compute_residual_sor(p, rhs, mask, grid, omega)
+
+Compute SOR residual norm (H2-style) for normalization.
+"""
+function compute_residual_sor(
+    p::Array{Float64, 3},
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    omega::Float64
+)::Float64
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+    res_sq = 0.0
+
+    @floop for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+        dz_k_val = grid.dz[k]
+        dZ_p = grid.z_center[k+1] - grid.z_center[k]
+        dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+        base_cz_p = (dx * dy) / dZ_p
+        base_cz_m = (dx * dy) / dZ_m
+        base_cy = (dx * dz_k_val) / dy
+        base_cx = (dy * dz_k_val) / dx
+        vol = dx * dy * dz_k_val
+
+        m0 = mask[i, j, k]
+
+        cond_xm = base_cx * (mask[i-1, j, k] * m0)
+        cond_xp = base_cx * (mask[i+1, j, k] * m0)
+        cond_ym = base_cy * (mask[i, j-1, k] * m0)
+        cond_yp = base_cy * (mask[i, j+1, k] * m0)
+        cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+        cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+        dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+        ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+             cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+             cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+
+        b_val = rhs[i, j, k] * vol
+        dp = ((ss - b_val) / dd - p[i, j, k]) * m0
+        sum_cond_minus = cond_xm + cond_ym + cond_zm
+        r_val = (dd + omega * sum_cond_minus) * dp / omega
+        @reduce(res_sq = 0.0 + r_val * r_val)
+    end
+
+    return sqrt(res_sq)
+end
+
+"""
+    apply_preconditioner!(z, r, mask, grid)
+
+Apply Gauss-Seidel preconditioner to solve M z = r.
+"""
+function apply_preconditioner!(
+    z::Array{Float64, 3},
+    r::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData
+)
+    fill!(z, 0.0)
+    dx, dy = grid.dx, grid.dy
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    omega = 1.0
+
+    for _ in 1:PRECONDITIONER_SWEEPS
+        for color in 0:1
+            @floop for k in 3:mz-2, j in 3:my-2
+                dz_k_val = grid.dz[k]
+                dZ_p = grid.z_center[k+1] - grid.z_center[k]
+                dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+                base_cz_p = (dx * dy) / dZ_p
+                base_cz_m = (dx * dy) / dZ_m
+                base_cy = (dx * dz_k_val) / dy
+                base_cx = (dy * dz_k_val) / dx
+                @simd for i in (3 + (j + k + color + 1) % 2):2:mx-2
+                    m0 = mask[i, j, k]
+                    
+                    cond_xm = base_cx * (mask[i-1, j, k] * m0)
+                    cond_xp = base_cx * (mask[i+1, j, k] * m0)
+                    cond_ym = base_cy * (mask[i, j-1, k] * m0)
+                    cond_yp = base_cy * (mask[i, j+1, k] * m0)
+                    cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+                    cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+                    ss = cond_xm * z[i-1, j, k] + cond_xp * z[i+1, j, k] +
+                         cond_ym * z[i, j-1, k] + cond_yp * z[i, j+1, k] +
+                         cond_zm * z[i, j, k-1] + cond_zp * z[i, j, k+1]
+
+                    b_val = r[i, j, k]
+                    dp = ((ss - b_val) / dd - z[i, j, k]) * m0
+                    z[i, j, k] += omega * dp
+                end
+            end
+        end
+    end
 end
 
 

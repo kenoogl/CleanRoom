@@ -2,11 +2,11 @@
 Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/backward_step/step.json
 
 --- Physical Parameters ---
-  Reference Length L0:              1 [m]    
+  Reference Length L0:            0.3 [m]    
   Reference Velocity U0:            5 [m/s]  
   Kinematic Viscosity ν:   1.5000e-05 [m²/s] 
-  Reynolds Number Re:       3.333e+05        
-  Reference Time T0:              0.2 [s]    
+  Reynolds Number Re:           1e+05        
+  Reference Time T0:             0.06 [s]    
 
 --- Grid Parameters ---
   Grid Size (Nx,Ny,Nz):  (50, 50, 50)
@@ -21,14 +21,14 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/backward_s
 --- Time Integration ---
   Time Scheme:           RK2
   Courant Number:                 0.2
-  Fixed Time Step Δt*:          0.004 (dimensionless)
+  Fixed Time Step Δt*:      0.0133333 (dimensionless)
   Fixed Time Step Δt:          0.0008 [s]
   Max Steps:                     1000
   Total Simulation Time:          0.8 [s]
 
 --- Poisson Solver ---
   Solver:                RedBlackSOR
-  Convergence Criteria:       1.0e-04
+  Convergence Criteria:       1.0e-03
   Max Iterations:                 500
 
 --- Output Intervals ---

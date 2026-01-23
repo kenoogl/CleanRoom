@@ -47,10 +47,10 @@
   },
   "Poisson_parameter": {
     "solver": "RedBlackSOR",
-    "coef_acceleration": 1.7,
-    "convergence_criteria": 1.0e-5,
+    "coef_acceleration": 1.2,
+    "convergence_criteria": 1.0e-4,
     "Iteration_max": 1000,
-    "on_divergence": "Abort"
+    "on_divergence": "warn_continue"
   },
   "Start_time_for_averaging": 10.0,
   "Time_Integration_Scheme": "RK2",

@@ -28,7 +28,7 @@ end
 """
     compute_dt(buffers, grid, Co, nu)
 
-時間刻みを計算。
+時間刻みを計算（拡散数チェックは別処理）。
 """
 function compute_dt(
     buffers::CFDBuffers,
@@ -58,9 +58,28 @@ function compute_dt(
     end
     
     dt_adv = Co * dx_min / U_ref
-    dt_diff = 0.5 * dx_min^2 / (nu + 1e-10)
     
-    return min(dt_adv, dt_diff)
+    return dt_adv
+end
+
+"""
+    compute_dt(grid, Co, nu, U_ref)
+
+時間刻みを計算（初期速度などからU_refを指定）。
+"""
+function compute_dt(
+    grid::GridData,
+    Co::Float64,
+    nu::Float64,
+    U_ref::Float64
+)::Float64
+    U_ref = max(U_ref, 1.0)
+    dx_min = min(grid.dx, grid.dy)
+    if !isempty(grid.dz)
+        dx_min = min(dx_min, minimum(grid.dz))
+    end
+
+    return Co * dx_min / U_ref
 end
 
 # --- Helper: Compute Flux H(u) ---
