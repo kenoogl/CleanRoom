@@ -32,7 +32,7 @@
     "checkpoint": 500
   },
   "Visualization": {
-    "interval": 100,
+    "interval": 50,
     "plane": "xz",
     "plane_index": 25,
     "variables": [
@@ -41,8 +41,8 @@
     ],
     "output_format": "png",
     "output_dir": "viz",
-    "vector_enabled": false,
-    "vector_skip": 1,
+    "vector_enabled": true,
+    "vector_skip": 2,
     "text_output": false
   },
   "Poisson_parameter": {

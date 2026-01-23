@@ -5,7 +5,7 @@ using ..Common
 using ..Grid
 using ..Fields: estimate_memory_size
 using ..TimeIntegration
-using ..BoundaryConditions: Dirichlet, Neumann, Outflow, Periodic, Symmetric, Wall, SlidingWall, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
+using ..BoundaryConditions: Dirichlet, Neumann, Outflow, Periodic, Symmetric, Wall, SlidingWall, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet, Inlet
 using ..PressureSolver
 using ..Visualization
 
@@ -259,6 +259,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     function parse_bc(bc_data)
         vel_str = lowercase(String(bc_data.velocity))
         bc_type = if vel_str == "dirichlet"; Dirichlet
+                  elseif vel_str == "inlet"; Inlet
                   elseif vel_str == "neumann"; Neumann
                   elseif vel_str == "outflow"; Outflow
                   elseif vel_str == "periodic"; Periodic
@@ -268,7 +269,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                   else; error("Unknown velocity BC type: $(vel_str)")
                   end
         val = (0.0, 0.0, 0.0)
-        if bc_type == Dirichlet || bc_type == SlidingWall
+        if bc_type == Dirichlet || bc_type == Inlet || bc_type == SlidingWall
             if !haskey(bc_data, :value)
                 error("$(bc_type) boundary requires value.")
             end

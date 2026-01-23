@@ -4,6 +4,8 @@ using ..Common
 using ..Grid
 using ..Fields
 
+using ..BoundaryConditions
+
 export add_convection_flux!
 
 """
@@ -42,13 +44,15 @@ WENO3再構成（左側 u^{-}_{i+1/2}）。
 end
 
 """
-    add_convection_flux!(buffers, grid, par)
+    add_convection_flux!(buffers, grid, bc_set, par)
 
 Lax-Friedrichs flux splitting + WENO3 reconstruction.
+Explicitly adds convective flux for Inlet boundaries.
 """
 function add_convection_flux!(
     buffers::CFDBuffers,
     grid::GridData,
+    bc_set::BoundaryConditionSet,
     par::String
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
@@ -210,6 +214,109 @@ function add_convection_flux!(
         buffers.flux_w[i, j, k] -= flx / grid.dz[k]
         buffers.flux_w[i, j, k+1] += flx / grid.dz[k+1]
     end
+    # --- Inlet Boundary Correction ---
+    # Apply explicit convective flux for Inlet boundaries (where mask=0 zeroes out the flux)
+    # Flux = u_bc * phi_bc * Area / Vol_cell? 
+    # Finite Volume: d/dt(phi) = -1/Vol * sum(Flux * Area)
+    # buffer.flux is "sum(Flux*Area)/Vol" term (or actually just d/dx term).
+    # In loop above: buffers.flux_u[i] -= flx / dx
+    # For x_min (i=3 inner): flux left face (i=2|3) is zeroed.
+    # We need to ADD flux entering from left: -(Flux_in - Flux_out)/dx
+    # Flux_in (left) is positive u * phi.
+    # Normal vector out of cell: Left face normal is -x. u_bc is positive (inflow).
+    # Fluid enters: u dot n < 0.
+    # Standard conservation: d/dt = - div(F)
+    # Cell 3: -(F_right - F_left)/dx
+    # F_left (at face 2|3): Should be u_bc * phi_bc.
+    # Mask made it 0. So we need to SUBTRACT (-F_left)/dx => ADD F_left/dx.
+    
+    # x_min
+    if bc_set.x_min.velocity_type == Inlet
+        u_bc = bc_set.x_min.velocity_value[1]
+        v_bc = bc_set.x_min.velocity_value[2]
+        w_bc = bc_set.x_min.velocity_value[3]
+        
+        # Add to i=3
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            buffers.flux_u[3, j, k] += (u_bc * u_bc) / grid.dx
+            buffers.flux_v[3, j, k] += (u_bc * v_bc) / grid.dx
+            buffers.flux_w[3, j, k] += (u_bc * w_bc) / grid.dx
+        end
+    end
+    
+    # x_max
+    if bc_set.x_max.velocity_type == Inlet
+        u_bc = bc_set.x_max.velocity_value[1]
+        v_bc = bc_set.x_max.velocity_value[2]
+        w_bc = bc_set.x_max.velocity_value[3]
+        
+        # i=mx-2 is last inner cell. Face is mx-2|mx-1.
+        # F_right is u_bc * phi_bc.
+        # Mask made it 0. We need to SUBTRACT F_right/dx.
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            buffers.flux_u[mx-2, j, k] -= (u_bc * u_bc) / grid.dx
+            buffers.flux_v[mx-2, j, k] -= (u_bc * v_bc) / grid.dx
+            buffers.flux_w[mx-2, j, k] -= (u_bc * w_bc) / grid.dx
+        end
+    end
+
+    # y_min
+    if bc_set.y_min.velocity_type == Inlet
+        u_bc = bc_set.y_min.velocity_value[1]
+        v_bc = bc_set.y_min.velocity_value[2]
+        w_bc = bc_set.y_min.velocity_value[3]
+        
+        # Add to j=3
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            buffers.flux_u[i, 3, k] += (v_bc * u_bc) / grid.dy
+            buffers.flux_v[i, 3, k] += (v_bc * v_bc) / grid.dy
+            buffers.flux_w[i, 3, k] += (v_bc * w_bc) / grid.dy
+        end
+    end
+    
+    # y_max
+    if bc_set.y_max.velocity_type == Inlet
+        u_bc = bc_set.y_max.velocity_value[1]
+        v_bc = bc_set.y_max.velocity_value[2]
+        w_bc = bc_set.y_max.velocity_value[3]
+        
+        # Subtract from j=my-2
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            buffers.flux_u[i, my-2, k] -= (v_bc * u_bc) / grid.dy
+            buffers.flux_v[i, my-2, k] -= (v_bc * v_bc) / grid.dy
+            buffers.flux_w[i, my-2, k] -= (v_bc * w_bc) / grid.dy
+        end
+    end
+
+    # z_min
+    if bc_set.z_min.velocity_type == Inlet
+        u_bc = bc_set.z_min.velocity_value[1]
+        v_bc = bc_set.z_min.velocity_value[2]
+        w_bc = bc_set.z_min.velocity_value[3]
+        
+        # Add to k=3
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            buffers.flux_u[i, j, 3] += (w_bc * u_bc) / grid.dz[3]
+            buffers.flux_v[i, j, 3] += (w_bc * v_bc) / grid.dz[3]
+            buffers.flux_w[i, j, 3] += (w_bc * w_bc) / grid.dz[3]
+        end
+    end
+    
+    # z_max
+    if bc_set.z_max.velocity_type == Inlet
+        u_bc = bc_set.z_max.velocity_value[1]
+        v_bc = bc_set.z_max.velocity_value[2]
+        w_bc = bc_set.z_max.velocity_value[3]
+        
+        # Subtract from k=mz-2
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            buffers.flux_u[i, j, mz-2] -= (w_bc * u_bc) / grid.dz[mz-2]
+            buffers.flux_v[i, j, mz-2] -= (w_bc * v_bc) / grid.dz[mz-2]
+            buffers.flux_w[i, j, mz-2] -= (w_bc * w_bc) / grid.dz[mz-2]
+        end
+    end
+
+
 end
 
 end # module Convection

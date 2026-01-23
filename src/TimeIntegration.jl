@@ -100,7 +100,7 @@ function compute_flux!(
     fill!(buffers.flux_w, 0.0)
     
     # 3. Add Convection & Diffusion
-    add_convection_flux!(buffers, grid, par)
+    add_convection_flux!(buffers, grid, bc_set, par)
     add_diffusion_flux!(buffers, grid, bc_set, par)
     
     # buffers.flux_u/v/w now holds H(u)

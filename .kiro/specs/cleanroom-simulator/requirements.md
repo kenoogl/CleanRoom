@@ -287,18 +287,20 @@ u⁻_{i+1/2} = ω₀·q₀ + ω₁·q₁
 **Objective:** As a シミュレーションエンジニア, I want 圧力ポアソン方程式を反復法で解ける, so that 圧力場を効率的に計算できる
 
 #### Acceptance Criteria
+#### Acceptance Criteria
 1. The Solver shall Red-Black SOR法による反復解法を実装する（必須）
 2. Where CG法が選択された場合, the Solver shall 共役勾配法を適用する（オプション）
 3. Where BiCGSTAB法が選択された場合, the Solver shall BiCGSTAB法を適用する（オプション）
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
 5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
 6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 5 sweep）を適用する
-7. The Solver shall 収束後に圧力場の空間平均値を計算し、外部境界に圧力基準点（Outflow等）が存在しない場合に限り全セルから平均値を減算する（ドリフト防止）
+7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算する（全周Neumann条件によるドリフト防止）
 
 #### 圧力平均値の引き戻し
 
-圧力境界条件が全面Neumannの場合、ポアソン方程式の解は定数分の不定性を持つ。
-時間積分を繰り返すと圧力値がドリフトするため、外部に固定圧力境界（Outflow等）が存在しない場合に限り、各ステップで以下の処理を行う：
+圧力境界条件は、Fractional Step法の整合性のため全境界でNeumann条件（$\partial p / \partial n = 0$）とする。
+このためポアソン方程式の解は定数分の不定性を持ち、時間積分に伴い圧力レベルがドリフトする可能性がある。
+これを防ぐため、境界条件の種類（Outflow等の有無）に関わらず、各ステップで必ず以下の処理を行う：
 
 ```
 p_avg = (1/N) Σ p_i      # 流体セルの空間平均
@@ -306,7 +308,7 @@ p_i = p_i - p_avg        # 全流体セルから平均値を減算
 ```
 
 ※ 物体セル（mask=0）は平均値計算から除外する
-※ Outflow境界など、圧力がDirichletで規定される境界が一つでも存在する場合、この平均値減算は行わない（基準圧力が固定されるため）
+※ Outflow境界であっても、圧力境界としてはNeumannとして扱うため、この処理は必須である
 
 #### 残差定義
 
@@ -338,8 +340,8 @@ r0 = b - A x0
 **Objective:** As a シミュレーションエンジニア, I want 各種境界条件を設定できる, so that 実際のクリーンルーム環境を模擬できる
 
 #### Acceptance Criteria
-1. The Solver shall 外部境界（6面）に対して標準条件（wall, symmetric, periodic, outflow, SlidingWall）および特殊条件（neumann, dirichlet）を速度に適用できる
-2. The Solver shall 外部境界の圧力にNeumann条件を適用する
+1. The Solver shall 外部境界（6面）に対して標準条件（wall, symmetric, periodic, outflow, SlidingWall）および流入条件（Inlet）を速度に適用できる
+2. The Solver shall 全ての外部境界の圧力にNeumann条件（$\partial p / \partial n = 0$）を適用する
 3. The Solver shall 壁面にデフォルトで粘着条件（速度）とNeumann条件（圧力）を適用する
 4. When 吹出口・吸込口が指定された時, the Solver shall 座標指定で速度を設定する
 5. The Solver shall 領域内の部分境界（矩形/円筒領域）に法線・速度を指定できる
@@ -349,15 +351,19 @@ r0 = b - A x0
 
 | 種別               | 速度                                            | 圧力    |
 | ------------------ | ----------------------------------------------- | ------- |
-| 外部境界（標準）    | 壁 (wall) / 対称 (symmetric) / 周期 (periodic) / 対流流出 (outflow) / SlidingWall | Neumann / 周期 / Dirichlet (outflowのみ) |
-| 外部境界（特殊）    | Dirichlet / Neumann | Neumann |
+| 外部境界           | 壁 (wall) / 対称 (symmetric) / 周期 (periodic) / 対流流出 (outflow) / 滑り壁 (SlidingWall) / 流入 (Inlet) | Neumann / 周期 |
 
-※ `outflow` 境界では、圧力の安定性を確保するため基準圧力として `prs = 0.0` (Dirichlet) を適用する。
+※ `dirichlet` は廃止され、流入条件は `Inlet`、壁面駆動は `SlidingWall` を使用する。JSON互換性のため `dirichlet` は読み込み時に `Inlet` として扱われる。
 
-※ `wall`, `symmetric`, `SlidingWall` の場合、ゴーストセルのマスク値は `0`（固体）に設定される。これに伴い、拡散項の計算ではマスク値に基づき境界での勾配がデフォルトでゼロ（Neumann）となる。
-※ `wall` および `SlidingWall` においては、物理的なノンスリップ条件を満足するため、拡散項の計算後に壁面せん断流束（例：Z+面の場合 $2 \nu_{eff} (U_w - u) / \Delta z^2$）を明示的に加算して修正を行う。
-※ `SlidingWall` は境界速度を指定する壁面（例: キャビティ流れの上壁）に使用する。指定値は `value` で与える。
-※ JSON で指定されるすべての文字列パラメータ（境界条件名、時間スキーム、ソルバー名等）は、**読み取り時に大文字小文字を区別せず評価される**（Case-Insensitive）。
+※ 周期境界を除く外部境界のうち、`Wall`, `Symmetric`, `SlidingWall` において、ゴーストセルのマスク値は常時 `0`（固体相当）に設定される。一方、`Inlet` および `Outflow` は、対流項計算時にゴーストセルの値を有効活用するため、デフォルトではマスク値 `1`（流体相当）として扱う。
+
+※ ただし、圧力ソルバー内でNeumann条件（$\partial p / \partial n = 0$）を自然に満たすため、**圧力反復計算の間だけ、`Outflow` 境界のマスク値を一時的に `0` に変更する。** 圧力計算終了後は再び `1` に戻す（動的マスク処理）。
+
+※ マスク `0` 化（常時または一時的）に伴う速度拡散項（粘性項）および対流項の不整合を防ぐため、以下の補正を行う：
+  - `Wall`, `SlidingWall`: 壁面せん断流束を加算（例: $2 \nu_{eff} (U_{wall} - u) / \Delta n^2$）
+  - `Inlet`: 流入境界値との差分に基づく拡散流束を明示的に加算する。対流項はマスク `1` のためWENO3で自然に計算される。
+  - `Outflow`: 拡散項は補正なし（勾配ゼロ）。対流項はマスク `1` のためWENO3で自然に計算される。
+  - **逆流安定化**: `Outflow` において流れが領域内に逆流している場合、不安定化を防ぐために対流項の寄与をゼロにクリップする。
 
 ※ Neumann条件は境界面の法線方向勾配（∂φ/∂n）を指定する
 
@@ -588,6 +594,7 @@ w[1, j, k] = w[4, j, k]
   - 物理パラメータ（L0, U0, ν, Re, T0）
   - 格子パラメータ（格子数、ドメインサイズ、セルサイズ）
   - 時間積分（スキーム、Co、Δt*、Δt、最大ステップ、総計算時間）
+  - 境界条件（外部境界設定、Inlet/Outlet/内部境界数）
   - ポアソンソルバー（ソルバー種別、収束判定値、最大反復数）
   - 出力間隔
 

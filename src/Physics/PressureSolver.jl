@@ -59,33 +59,25 @@ function solve_poisson!(
     
     converged, iter, residual = result
 
-    # Mean pressure subtraction (only for purely Neumann/Periodic systems)
-    # Check if there's any Dirichlet or Outflow boundary (which provides a reference)
-    has_reference = if !isnothing(bc_set)
-        (bc_set.x_min.velocity_type == Outflow || bc_set.x_max.velocity_type == Outflow ||
-         bc_set.y_min.velocity_type == Outflow || bc_set.y_max.velocity_type == Outflow ||
-         bc_set.z_min.velocity_type == Outflow || bc_set.z_max.velocity_type == Outflow)
-    else
-        false
+    # Mean pressure subtraction
+    # Since we use Neumann BCs for pressure on all boundaries (via mask=0),
+    # the pressure solution is unique only up to a constant.
+    # We must enforce mean(p) = 0 (or some reference) to prevent drift.
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    mask = buffers.mask
+    p = buffers.p
+    
+    sum_p = 0.0
+    count = 0.0
+    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+        sum_p += p[i, j, k] * mask[i, j, k]
+        count += mask[i, j, k]
     end
-
-    if !has_reference
-        mx, my, mz = grid.mx, grid.my, grid.mz
-        mask = buffers.mask
-        p = buffers.p
-        
-        sum_p = 0.0
-        count = 0.0
-        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-            sum_p += p[i, j, k] * mask[i, j, k]
-            count += mask[i, j, k]
-        end
-        
-        if count > 0
-            avg_p = sum_p / count
-            @inbounds for k in 1:mz, j in 1:my, i in 1:mx
-                p[i, j, k] -= avg_p
-            end
+    
+    if count > 0
+        avg_p = sum_p / count
+        @inbounds for k in 1:mz, j in 1:my, i in 1:mx
+            p[i, j, k] -= avg_p
         end
     end
 
@@ -121,6 +113,11 @@ function solve_poisson_sor!(
     iter = 0
     residual = 0.0
     converged = false
+
+    # Ensure BCs are consistent before computing initial residual
+    if !isnothing(bc_set)
+        apply_pressure_bcs!(p, grid, mask, bc_set)
+    end
 
     res0 = compute_residual_sor(p, rhs, mask, grid, config.omega)
     if res0 == 0.0

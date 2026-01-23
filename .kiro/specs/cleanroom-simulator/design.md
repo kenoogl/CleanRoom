@@ -186,13 +186,15 @@ flowchart TB
     E --> E2[Apply BCs to Pseudo Velocity]
     E2 --> F[Interpolate to Cell Faces]
     F --> G[Compute Divergence]
-    G --> H[Solve Poisson Equation]
+    G --> H_mask[Temporarily Mask Outflow as 0.0]
+    H_mask --> H[Solve Poisson Equation]
     H --> I{Converged?}
-    I -->|Yes| J[Correct Velocity]
+    I -->|Yes| J_unmask[Restore Outflow Mask to 1.0]
+    J_unmask --> J[Correct Velocity]
     I -->|No| K[Iteration Limit?]
     K -->|No| H
     K -->|Yes| L[Warn and Continue]
-    L --> J
+    L --> J_unmask
     J --> M[Apply Boundary Conditions]
     M --> N[Update Time Average]
     N --> O[End Step]
@@ -540,10 +542,12 @@ end
 - 各軸独立にf⁺/f⁻を再構成
 - 壁面境界: マスク値を用いて壁面速度をゼロとして対流フラックスを計算
 
-**壁面境界での対流フラックス処理**
+**壁面・流入境界での対流フラックス処理**
 - セルフェイスにおいて隣接セルが物体（mask=0）の場合、その方向の速度をゼロとみなす
 - フラックス計算時: `u_neighbor = u_neighbor * mask_neighbor`
 - これにより壁面での対流フラックスが自動的に粘着条件を満たす
+- **Inlet/Outflow**: 対流計算時に `mask=1.0` を維持するため、WENO3スキームによってゴーストセル値を用いた自然な流束計算が行われる
+- **逆流安定化**: `Outflow` において速度ベクトルが領域内に向いている（逆流）場合、フラックスをゼロにクリップして数値的不安定性を防止する
 
 **Dependencies**
 - Inbound: FractionalStep — フラックス計算呼び出し (P0)
@@ -593,6 +597,9 @@ end
 - 非等間隔格子対応の中心差分
 - 調和平均による界面粘性係数
 - 壁面境界: マスク関数を用いて勾配をゼロにする（Neumann条件）
+- **フラックス補正**: マスク0化に伴う拡散項の過小評価を防ぐため、以下の補正を行う
+  - Wall/SlidingWall: 壁面せん断流束を加算
+  - Inlet: 流入境界値との差分に基づく流束を加算
 
 **壁面境界での拡散フラックス処理**
 - 壁面（mask=0）に隣接するセルフェイスでは、速度勾配をゼロとみなす
@@ -619,7 +626,7 @@ function add_diffusion_flux!(
 )
     # Preconditions: buffers.u,v,w, buffers.nu_eff が有効、buffers.flux_u,v,wが初期化済み
     # Postconditions: buffers.flux_u,v,w に拡散フラックスを加算
-    # 壁面境界: mask配列を参照し、勾配ゼロ条件を適用
+    # 壁面・流入境界: mask配列を参照し勾配ゼロとした後、適切なフラックス補正を加算
 end
 ```
 
@@ -674,7 +681,7 @@ end
 - 反復ループ内での `apply_pressure_bcs!` 呼び出しによる境界条件（Neumann/Periodic等）のリアルタイム更新
 - 真の残差 $|b - Ax|$ に基づく収束判定
 - CG/BiCGSTABは前処理付き（Gauss-Seidel 5 sweep）共役勾配法で収束判定
-- 圧力平均値の引き戻し（外部基準点がない場合のみ）
+- **圧力平均値の引き戻し**: 全境界がNeumannとなるため、常に全セルから平均値を減算してドリフトを防止
 
 **Dependencies**
 - Inbound: FractionalStep — ポアソン解法呼び出し (P0)
@@ -714,7 +721,7 @@ function solve_poisson!(
     # Returns: (収束フラグ, 反復回数, 最終残差)
     # Postconditions: 
     #   1. 反復計算（apply_pressure_bcs! をループ内で適宜呼び出し）
-    #   2. has_reference フラグ（Outflow等の有無）に基づき、必要な場合のみ平均値を引き戻し
+    #   2. 常に平均値を引き戻し（ドリフト防止）
     #   3. buffers.p に最終的な圧力場を格納
 end
 ```
@@ -758,8 +765,10 @@ function fractional_step!(
     # 1. compute_pseudo_velocity!
     # 2. interpolate_to_faces!
     # 3. compute_divergence!
-    # 4. solve_poisson!
-    # 5. correct_velocity!
+    # 4. update_outflow_mask!(mask, 0.0)  # Temporarily set mask to 0 for pressure
+    # 5. solve_poisson!
+    # 6. update_outflow_mask!(mask, 1.0)  # Restore mask to 1 for velocity update
+    # 7. correct_velocity!
 end
 
 # セルフェイス内挿
@@ -909,11 +918,10 @@ end
 | Requirements | 8.1, 8.2, 8.3, 8.4, 8.5, 8.6 |
 
 **Responsibilities & Constraints**
-- 外部境界（標準）: wall / symmetric / periodic / outflow / SlidingWall
-- 外部境界（特殊）: Dirichlet / Neumann
+- 外部境界（標準）: wall / symmetric / periodic / outflow / SlidingWall / Inlet
 - 内部境界: 吹出口・吸込口、矩形/円筒領域
 - 優先順位: 内部境界 > 物体 > 外部境界
-- `wall`, `symmetric`, `SlidingWall` 時のゴーストセルマスク設定 (mask=0)
+- `wall`, `symmetric`, `SlidingWall`, `Inlet`, `outflow` 時のゴーストセルマスク設定 (mask=0)
 
 **Dependencies**
 - Inbound: FractionalStep — BC適用呼び出し (P0)
@@ -926,6 +934,7 @@ end
 
 ```julia
 @enum VelocityBCType begin
+    Inlet
     Dirichlet
     Neumann
     Outflow
@@ -937,7 +946,7 @@ end
 
 struct ExternalBC
     velocity_type::VelocityBCType
-    velocity_value::NTuple{3, Float64}  # Dirichlet時の値
+    velocity_value::NTuple{3, Float64}  # Inlet/SlidingWall時の値
 end
 
 struct InletOutlet
@@ -969,7 +978,7 @@ function apply_boundary_conditions!(
     par::String
 )
     # 周期BCペアをチェックして適用
-    # 非周期境界にはDirichlet/Neumann/Outflowを適用
+    # 非周期境界にはInlet/Neumann/Outflow/Wall等を適用
 end
 
 # 周期境界条件の適用（ゴーストセル交換）
@@ -1342,7 +1351,14 @@ struct MonitorConfig
     step_digits::Int          # ステップ番号の桁数（カラム幅調整用）
 end
 
-function init_monitor(config::MonitorConfig, history_path::String)
+function init_monitor(
+    config::MonitorConfig,
+    history_path::String,
+    condition_path::String,
+    params::SimulationParams,
+    bc_set::BoundaryConditionSet
+)
+    # condition.txt 書き込み（パラメータ + 境界条件）
     # historyファイルヘッダ書き込み
 end
 

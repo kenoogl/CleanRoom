@@ -5,11 +5,14 @@ using ..Grid
 using ..Fields
 
 export VelocityBCType, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
-export Dirichlet, Neumann, Outflow, Periodic
+export Dirichlet, Neumann, Outflow, Periodic, Symmetric, Wall, SlidingWall, Inlet 
 export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
-export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!, apply_face_velocity_bcs!, apply_boundary_mask!, apply_pressure_bcs!
+export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!
+export apply_face_velocity_bcs!, apply_boundary_mask!, apply_pressure_bcs!
+export apply_outflow_region!, update_outflow_mask!
 
 @enum VelocityBCType begin
+    Inlet
     Dirichlet
     Neumann
     Outflow
@@ -283,6 +286,16 @@ function apply_outflow!(
     end
 end
 
+"""
+    apply_outflow_region!(phi, grid, face, dt, Uc, region_check)
+
+領域指定付きの対流流出条件を適用する。
+`Outflow` 条件が指定された `InletOutlet`（パッチ）に対して、
+`region_check` で指定された範囲内のゴーストセルのみを更新する。
+
+- `Uc`: 領域内の平均流出速度（`compute_region_average_velocity` で計算）
+- `region_check(i, j, k)`: インデックスがパッチ内かどうかを判定する関数
+"""
 function apply_outflow_region!(
     phi::Array{Float64, 3},
     grid::GridData,
@@ -497,7 +510,7 @@ function set_boundary_value!(
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     
-    if type == Dirichlet
+    if type == Dirichlet || type == Inlet
         if face == :x_min
              # Use mask from first internal cell (i=3)
              @inbounds for k in 1:mz, j in 1:my
@@ -669,10 +682,10 @@ function apply_velocity_bcs!(
 )
     # 1. External Boundaries
     function apply_ext(bc, face)
-        if bc.velocity_type == Dirichlet
-             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], Dirichlet)
-             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], Dirichlet)
-             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], Dirichlet)
+        if bc.velocity_type == Dirichlet || bc.velocity_type == Inlet
+             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], bc.velocity_type)
+             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], bc.velocity_type)
+             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], bc.velocity_type)
         elseif bc.velocity_type == Neumann
              set_boundary_value!(u, grid, mask, face, 0.0, Neumann)
              set_boundary_value!(v, grid, mask, face, 0.0, Neumann)
@@ -1137,8 +1150,8 @@ end
     apply_boundary_mask!(mask, grid, bc_set)
 
 外部境界条件に基づいてゴーストセルのマスク値を設定する。
-- Symmetric or Wall: 0.0 (Solid)
-- Others: 1.0 (Fluid)
+- Wall, Symmetric: 0.0 (Solid) -> Flux blocked
+- Inlet, Outflow, Neumann: 1.0 (Fluid) -> Flux allowed (handled by ghost cells)
 """
 function apply_boundary_mask!(
     mask::Array{Float64, 3},
@@ -1147,30 +1160,74 @@ function apply_boundary_mask!(
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
 
-    function set_mask(bc, face)
-        if bc.velocity_type == Symmetric || bc.velocity_type == Wall || bc.velocity_type == SlidingWall
-            if face == :x_min
-                mask[1:2, :, :] .= 0.0
-            elseif face == :x_max
-                mask[mx-1:mx, :, :] .= 0.0
-            elseif face == :y_min
-                mask[:, 1:2, :] .= 0.0
-            elseif face == :y_max
-                mask[:, my-1:my, :] .= 0.0
-            elseif face == :z_min
-                mask[:, :, 1:2] .= 0.0
-            elseif face == :z_max
-                mask[:, :, mz-1:mz] .= 0.0
-            end
+    function set_mask(bc, face, val)
+        if face == :x_min
+            mask[1:2, :, :] .= val
+        elseif face == :x_max
+            mask[mx-1:mx, :, :] .= val
+        elseif face == :y_min
+            mask[:, 1:2, :] .= val
+        elseif face == :y_max
+            mask[:, my-1:my, :] .= val
+        elseif face == :z_min
+            mask[:, :, 1:2] .= val
+        elseif face == :z_max
+            mask[:, :, mz-1:mz] .= val
         end
     end
 
-    set_mask(bc_set.x_min, :x_min)
-    set_mask(bc_set.x_max, :x_max)
-    set_mask(bc_set.y_min, :y_min)
-    set_mask(bc_set.y_max, :y_max)
-    set_mask(bc_set.z_min, :z_min)
-    set_mask(bc_set.z_max, :z_max)
+    # Default all ghosts to 1.0 (Fluid) unless Wall/Symmetric
+    # Actually, iterate through BCs
+    for (face, bc) in [
+        (:x_min, bc_set.x_min), (:x_max, bc_set.x_max),
+        (:y_min, bc_set.y_min), (:y_max, bc_set.y_max),
+        (:z_min, bc_set.z_min), (:z_max, bc_set.z_max)
+    ]
+        if bc.velocity_type == Wall || bc.velocity_type == Symmetric || bc.velocity_type == SlidingWall
+            set_mask(bc, face, 0.0)
+        else
+            set_mask(bc, face, 1.0)
+        end
+    end
+end
+
+"""
+    update_outflow_mask!(mask, grid, bc_set, val)
+
+Outflow境界のゴーストセルマスクを指定した値に変更する。
+- 圧力計算時: val = 0.0 (Solid) -> Neumann条件
+- 対流計算時: val = 1.0 (Fluid) -> 流れを許容
+"""
+function update_outflow_mask!(
+    mask::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    val::Float64
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    
+    function set_val(face)
+        if face == :x_min
+            mask[1:2, :, :] .= val
+        elseif face == :x_max
+            mask[mx-1:mx, :, :] .= val
+        elseif face == :y_min
+            mask[:, 1:2, :] .= val
+        elseif face == :y_max
+            mask[:, my-1:my, :] .= val
+        elseif face == :z_min
+            mask[:, :, 1:2] .= val
+        elseif face == :z_max
+            mask[:, :, mz-1:mz] .= val
+        end
+    end
+
+    if bc_set.x_min.velocity_type == Outflow; set_val(:x_min); end
+    if bc_set.x_max.velocity_type == Outflow; set_val(:x_max); end
+    if bc_set.y_min.velocity_type == Outflow; set_val(:y_min); end
+    if bc_set.y_max.velocity_type == Outflow; set_val(:y_max); end
+    if bc_set.z_min.velocity_type == Outflow; set_val(:z_min); end
+    if bc_set.z_max.velocity_type == Outflow; set_val(:z_max); end
 end
 
 end # module BoundaryConditions

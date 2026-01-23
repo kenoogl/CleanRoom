@@ -7,10 +7,10 @@
       "velocity": "wall"
     },
     "y_min": {
-      "velocity": "periodic"
+      "velocity": "symmetric"
     },
     "y_max": {
-      "velocity": "periodic"
+      "velocity": "symmetric"
     },
     "z_min": {
       "velocity": "wall"

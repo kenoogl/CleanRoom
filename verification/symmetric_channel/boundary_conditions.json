@@ -1,7 +1,7 @@
 {
   "external_boundaries": {
     "x_min": {
-      "velocity": "dirichlet",
+      "velocity": "inlet",
       "value": [
         0.5,
         0.0,
@@ -18,7 +18,7 @@
       "velocity": "symmetric"
     },
     "z_min": {
-      "velocity": "symmetric"
+      "velocity": "wall"
     },
     "z_max": {
       "velocity": "wall"

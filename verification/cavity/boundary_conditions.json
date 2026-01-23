@@ -1,11 +1,28 @@
 {
   "external_boundaries": {
-    "x_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "x_max": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "y_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "y_max": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "z_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "z_max": { "velocity": "dirichlet", "value": [1.0, 0.0, 0.0] }
+    "x_min": {
+      "velocity": "wall"
+    },
+    "x_max": {
+      "velocity": "wall"
+    },
+    "y_min": {
+      "velocity": "wall"
+    },
+    "y_max": {
+      "velocity": "wall"
+    },
+    "z_min": {
+      "velocity": "wall"
+    },
+    "z_max": {
+      "velocity": "SlidingWall",
+      "value": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    }
   },
   "inlets": [],
   "outlets": [],

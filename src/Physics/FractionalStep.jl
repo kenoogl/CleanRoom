@@ -31,7 +31,7 @@ function compute_pseudo_velocity!(
     fill!(buffers.flux_w, 0.0)
     
     # 1. Convection
-    add_convection_flux!(buffers, grid, par)
+    add_convection_flux!(buffers, grid, bc_set, par)
     
     # 2. Diffusion
     add_diffusion_flux!(buffers, grid, bc_set, par)
@@ -259,7 +259,13 @@ function fractional_step!(
     compute_divergence!(buffers, grid, dt, par)
     
     # 5. Poisson Solve
+    # Temporarily set Outflow mask to 0.0 to enforce Neumann pressure BC (dp/dn=0)
+    update_outflow_mask!(buffers.mask, grid, bc_set, 0.0)
+    
     converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par)
+    
+    # Restore Outflow mask to 1.0 for Convection/Velocity update
+    update_outflow_mask!(buffers.mask, grid, bc_set, 1.0)
     
     # 6. Correct Velocity (Face and Center)
     correct_velocity!(buffers, grid, dt, par)

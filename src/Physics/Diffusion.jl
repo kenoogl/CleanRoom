@@ -3,7 +3,7 @@ module Diffusion
 using ..Common
 using ..Grid
 using ..Fields
-using ..BoundaryConditions: BoundaryConditionSet, Wall, SlidingWall
+using ..BoundaryConditions: BoundaryConditionSet, Wall, SlidingWall, Inlet
 
 export add_diffusion_flux!
 
@@ -138,7 +138,7 @@ function add_diffusion_flux!(
              (:z_min, bc_set.z_min), (:z_max, bc_set.z_max)]
     
     for (f_sym, bc) in faces
-        if bc.velocity_type == Wall || bc.velocity_type == SlidingWall
+        if bc.velocity_type == Wall || bc.velocity_type == SlidingWall || bc.velocity_type == Inlet
             uw, vw, ww = bc.velocity_value
             nu_eff = buffers.nu_eff
             

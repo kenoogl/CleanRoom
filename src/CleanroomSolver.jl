@@ -13,10 +13,10 @@ include("Physics/Convection.jl")
 include("Physics/FractionalStep.jl")
 include("TimeIntegration.jl") 
 include("IO/Visualization.jl")
-include("IO/Monitor.jl")
 include("IO/Checkpoint.jl")
 include("IO/SPHWriter.jl")
 include("IO/InputReader.jl")
+include("IO/Monitor.jl")
 
 # --- Using submodules ---
 using .Common
@@ -158,13 +158,22 @@ function run_simulation(param_file::String)
     mkpath(out_dir)
     println("Output Directory: $out_dir")
     
-    init_monitor(monitor_config, joinpath(out_dir, "history.txt"))
+    init_monitor(
+        monitor_config,
+        joinpath(out_dir, "history.txt"),
+        joinpath(out_dir, "condition.txt"),
+        sim_params,
+        grid,
+        bc_set,
+        dt_fixed,
+        param_file
+    )
     
     # Calculate fixed time step (dimensionless)
     println("Fixed time step (dimensionless): Δt* = $dt_fixed")
     
-    # Output calculation conditions to condition.txt
-    write_condition_file(out_dir, param_file, dim_params, sim_params, grid, dt_fixed)
+    # Initialize Ghost Cells with BCs before first step
+    apply_boundary_conditions!(buffers, grid, bc_set, dt_fixed, "thread")
     
     println("Starting Time Loop...")
     step = start_step
@@ -205,7 +214,7 @@ function run_simulation(param_file::String)
         v_prev .= buffers.v
         w_prev .= buffers.w
         
-        mon_data = MonitorData(step, time, u_max, div_max, dU, pitr, pres)
+        mon_data = MonitorData(step, time, u_max, div_max, (div_i, div_j, div_k), dU, pitr, pres)
         open(joinpath(out_dir, "history.txt"), "a") do io
             log_step!(mon_data, monitor_config; console_io=stdout, history_io=io)
         end
@@ -262,59 +271,5 @@ function run_simulation(param_file::String)
 end
 
 
-"""
-    write_condition_file(out_dir, param_file, dim_params, sim_params, grid, dt_fixed)
-
-計算条件をファイルに出力する。
-"""
-function write_condition_file(out_dir, param_file, dim_params, sim_params, grid, dt_fixed)
-    condition_file = joinpath(out_dir, "condition.txt")
-    open(condition_file, "w") do io
-        println(io, "=== Calculation Conditions ===")
-        println(io, "Parameter File: $(abspath(param_file))")
-        println(io, "")
-        println(io, "--- Physical Parameters ---")
-        @printf(io, "  %-22s %12.4g [m]    \n", "Reference Length L0:", dim_params.L0)
-        @printf(io, "  %-22s %12.4g [m/s]  \n", "Reference Velocity U0:", dim_params.U0)
-        @printf(io, "  %-22s %12.4e [m²/s] \n", "Kinematic Viscosity ν:", dim_params.nu)
-        @printf(io, "  %-22s %12.4g        \n", "Reynolds Number Re:", dim_params.Re)
-        @printf(io, "  %-22s %12.4g [s]    \n", "Reference Time T0:", dim_params.T0)
-        println(io, "")
-        println(io, "--- Grid Parameters ---")
-        @printf(io, "  %-22s (%d, %d, %d)\n", "Grid Size (Nx,Ny,Nz):", grid.mx-4, grid.my-4, grid.mz-4)
-        @printf(io, "  %-22s %12.4g [m]\n", "Domain Lx:", sim_params.grid_config.Lx)
-        @printf(io, "  %-22s %12.4g [m]\n", "Domain Ly:", sim_params.grid_config.Ly)
-        Lz = (grid.z_face[end-2] - grid.z_face[3]) * dim_params.L0
-        @printf(io, "  %-22s %12.4g [m]\n", "Domain Lz:", Lz)
-        @printf(io, "  %-22s %12.6g [m]\n", "Cell Δx:", grid.dx * dim_params.L0)
-        @printf(io, "  %-22s %12.6g [m]\n", "Cell Δy:", grid.dy * dim_params.L0)
-        dz_min = minimum(grid.dz[3:end-2]) * dim_params.L0
-        dz_max = maximum(grid.dz[3:end-2]) * dim_params.L0
-        @printf(io, "  %-22s %12.6g [m] (min)\n", "Cell Δz:", dz_min)
-        @printf(io, "  %-22s %12.6g [m] (max)\n", "", dz_max)
-        println(io, "")
-        println(io, "--- Time Integration ---")
-        @printf(io, "  %-22s %s\n", "Time Scheme:", sim_params.time_scheme)
-        @printf(io, "  %-22s %12.4g\n", "Courant Number:", sim_params.courant_number)
-        @printf(io, "  %-22s %12.6g (dimensionless)\n", "Fixed Time Step Δt*:", dt_fixed)
-        @printf(io, "  %-22s %12.6g [s]\n", "Fixed Time Step Δt:", dt_fixed * dim_params.T0)
-        @printf(io, "  %-22s %12d\n", "Max Steps:", sim_params.max_step)
-        total_time_nd = dt_fixed * sim_params.max_step
-        total_time_dim = total_time_nd * dim_params.T0
-        @printf(io, "  %-22s %12.4g [s]\n", "Total Simulation Time:", total_time_dim)
-        println(io, "")
-        println(io, "--- Poisson Solver ---")
-        @printf(io, "  %-22s %s\n", "Solver:", sim_params.poisson.solver)
-        @printf(io, "  %-22s %12.1e\n", "Convergence Criteria:", sim_params.poisson.tol)
-        @printf(io, "  %-22s %12d\n", "Max Iterations:", sim_params.poisson.max_iter)
-        println(io, "")
-        println(io, "--- Output Intervals ---")
-        @printf(io, "  %-22s %8d steps\n", "Display:", sim_params.intervals.display)
-        @printf(io, "  %-22s %8d steps\n", "History:", sim_params.intervals.history)
-        @printf(io, "  %-22s %8d steps\n", "Instantaneous:", sim_params.intervals.instantaneous)
-        @printf(io, "  %-22s %8d steps\n", "Checkpoint:", sim_params.intervals.checkpoint)
-    end
-    println("Condition file: $condition_file")
-end
 
 end # module CleanroomSolver
