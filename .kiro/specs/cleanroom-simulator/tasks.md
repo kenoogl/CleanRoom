@@ -73,12 +73,12 @@ Outflow境界では粘性項をゼロとし、対流項のみで流出条件を�
 
 弱圧縮性を考慮した連続式（M² ∂p/∂t + ∂u_i/∂x_i = 0）を導入
 
-- [ ] 6.1: マッハ数M（= U_ref/c_sound）をパラメータとして追加
-- [ ] 6.2: ポアソン方程式のソース項にM²項を追加
-- [ ] 6.3: 圧力時間微分項の離散化を実装
-- [ ] 6.4: 弱圧縮性対応のためPoisson演算子をHelmholtz化（∇²p - αp）
-- [ ] 6.5: p^n保持用バッファを追加し、rhs構築で使用する
-- [ ] 6.6: Mach_number / Sound_Speed の入力仕様と検証を実装
+- [x] 6.1: マッハ数M（= U_ref/c_sound）をパラメータとして追加
+- [x] 6.2: ポアソン方程式のソース項にM²項を追加
+- [x] 6.3: 圧力時間微分項の離散化を実装
+- [x] 6.4: 弱圧縮性対応のためPoisson演算子をHelmholtz化（∇²p - αp）
+- [x] 6.5: p^n保持用バッファを追加し、rhs構築で使用する
+- [x] 6.6: Mach_number / Sound_Speed の入力仕様と検証を実装
 
 ---
 
@@ -87,9 +87,9 @@ Outflow境界では粘性項をゼロとし、対流項のみで流出条件を�
 
 前処理sweep数とBiCGSTAB実装を仕様に合わせる
 
-- [ ] 7.1: PRECONDITIONER_SWEEPSを5から4に変更
-- [ ] 7.2: BiCGSTAB法を実装（前処理付き）
-- [ ] 7.3: on_divergence設定（WarnContinue/Abort）の動作を実装
+- [x] 7.1: PRECONDITIONER_SWEEPSを4に変更
+- [x] 7.2: BiCGSTAB法を実装（前処理付き）
+- [x] 7.3: on_divergence設定（WarnContinue/Abort）の動作を実装
 
 ---
 
