@@ -3,7 +3,7 @@ module Diffusion
 using ..Common
 using ..Grid
 using ..Fields
-using ..BoundaryConditions: BoundaryConditionSet, Wall, SlidingWall, Inlet
+using ..BoundaryConditions: BoundaryConditionSet, Wall, SlidingWall, Inflow
 
 export add_diffusion_flux!
 
@@ -32,6 +32,13 @@ function add_diffusion_flux!(
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
     dx2, dy2 = dx^2, dy^2
+
+    outflow_xmin = bc_set.x_min.velocity_type == Outflow
+    outflow_xmax = bc_set.x_max.velocity_type == Outflow
+    outflow_ymin = bc_set.y_min.velocity_type == Outflow
+    outflow_ymax = bc_set.y_max.velocity_type == Outflow
+    outflow_zmin = bc_set.z_min.velocity_type == Outflow
+    outflow_zmax = bc_set.z_max.velocity_type == Outflow
     
     # 1. 内部セル（3:mx-2...）の基本ループ（Neumann条件考慮済み）
     @inbounds for k in 3:mz-2
@@ -56,6 +63,8 @@ function add_diffusion_flux!(
                 grad_e = (buffers.u[i+1, j, k] - u_c) / dx
                 if buffers.mask[i-1, j, k] == 0.0; grad_w = 0.0; end
                 if buffers.mask[i+1, j, k] == 0.0; grad_e = 0.0; end
+                if outflow_xmin && i == 3; grad_w = 0.0; end
+                if outflow_xmax && i == mx-2; grad_e = 0.0; end
                 diff_u_x = (nu_e * grad_e - nu_w * grad_w) / dx
                 
                 # y-direction
@@ -65,6 +74,8 @@ function add_diffusion_flux!(
                 grad_n = (buffers.u[i, j+1, k] - u_c) / dy
                 if buffers.mask[i, j-1, k] == 0.0; grad_s = 0.0; end
                 if buffers.mask[i, j+1, k] == 0.0; grad_n = 0.0; end
+                if outflow_ymin && j == 3; grad_s = 0.0; end
+                if outflow_ymax && j == my-2; grad_n = 0.0; end
                 diff_u_y = (nu_n * grad_n - nu_s * grad_s) / dy
                 
                 # z-direction
@@ -74,6 +85,8 @@ function add_diffusion_flux!(
                 grad_t = (buffers.u[i, j, k+1] - u_c) / dz_p
                 if buffers.mask[i, j, k-1] == 0.0; grad_b = 0.0; end
                 if buffers.mask[i, j, k+1] == 0.0; grad_t = 0.0; end
+                if outflow_zmin && k == 3; grad_b = 0.0; end
+                if outflow_zmax && k == mz-2; grad_t = 0.0; end
                 diff_u_z = (nu_t * grad_t - nu_b * grad_b) / dz
                 
                 buffers.flux_u[i, j, k] += (diff_u_x + diff_u_y + diff_u_z)
@@ -84,6 +97,8 @@ function add_diffusion_flux!(
                 grad_e = (buffers.v[i+1, j, k] - v_c) / dx
                 if buffers.mask[i-1, j, k] == 0.0; grad_w = 0.0; end
                 if buffers.mask[i+1, j, k] == 0.0; grad_e = 0.0; end
+                if outflow_xmin && i == 3; grad_w = 0.0; end
+                if outflow_xmax && i == mx-2; grad_e = 0.0; end
                 diff_v_x = (nu_e * grad_e - nu_w * grad_w) / dx
                 
                 # y
@@ -91,6 +106,8 @@ function add_diffusion_flux!(
                 grad_n = (buffers.v[i, j+1, k] - v_c) / dy
                 if buffers.mask[i, j-1, k] == 0.0; grad_s = 0.0; end
                 if buffers.mask[i, j+1, k] == 0.0; grad_n = 0.0; end
+                if outflow_ymin && j == 3; grad_s = 0.0; end
+                if outflow_ymax && j == my-2; grad_n = 0.0; end
                 diff_v_y = (nu_n * grad_n - nu_s * grad_s) / dy
                 
                 # z
@@ -98,6 +115,8 @@ function add_diffusion_flux!(
                 grad_t = (buffers.v[i, j, k+1] - v_c) / dz_p
                 if buffers.mask[i, j, k-1] == 0.0; grad_b = 0.0; end
                 if buffers.mask[i, j, k+1] == 0.0; grad_t = 0.0; end
+                if outflow_zmin && k == 3; grad_b = 0.0; end
+                if outflow_zmax && k == mz-2; grad_t = 0.0; end
                 diff_v_z = (nu_t * grad_t - nu_b * grad_b) / dz
                 
                 buffers.flux_v[i, j, k] += (diff_v_x + diff_v_y + diff_v_z)
@@ -108,6 +127,8 @@ function add_diffusion_flux!(
                 grad_e = (buffers.w[i+1, j, k] - w_c) / dx
                 if buffers.mask[i-1, j, k] == 0.0; grad_w = 0.0; end
                 if buffers.mask[i+1, j, k] == 0.0; grad_e = 0.0; end
+                if outflow_xmin && i == 3; grad_w = 0.0; end
+                if outflow_xmax && i == mx-2; grad_e = 0.0; end
                 diff_w_x = (nu_e * grad_e - nu_w * grad_w) / dx
                 
                 # y
@@ -115,6 +136,8 @@ function add_diffusion_flux!(
                 grad_n = (buffers.w[i, j+1, k] - w_c) / dy
                 if buffers.mask[i, j-1, k] == 0.0; grad_s = 0.0; end
                 if buffers.mask[i, j+1, k] == 0.0; grad_n = 0.0; end
+                if outflow_ymin && j == 3; grad_s = 0.0; end
+                if outflow_ymax && j == my-2; grad_n = 0.0; end
                 diff_w_y = (nu_n * grad_n - nu_s * grad_s) / dy
                 
                 # z
@@ -122,6 +145,8 @@ function add_diffusion_flux!(
                 grad_t = (buffers.w[i, j, k+1] - w_c) / dz_p
                 if buffers.mask[i, j, k-1] == 0.0; grad_b = 0.0; end
                 if buffers.mask[i, j, k+1] == 0.0; grad_t = 0.0; end
+                if outflow_zmin && k == 3; grad_b = 0.0; end
+                if outflow_zmax && k == mz-2; grad_t = 0.0; end
                 diff_w_z = (nu_t * grad_t - nu_b * grad_b) / dz
                 
                 buffers.flux_w[i, j, k] += (diff_w_x + diff_w_y + diff_w_z)
@@ -138,7 +163,7 @@ function add_diffusion_flux!(
              (:z_min, bc_set.z_min), (:z_max, bc_set.z_max)]
     
     for (f_sym, bc) in faces
-        if bc.velocity_type == Wall || bc.velocity_type == SlidingWall || bc.velocity_type == Inlet
+        if bc.velocity_type == Wall || bc.velocity_type == SlidingWall || bc.velocity_type == Inflow
             uw, vw, ww = bc.velocity_value
             nu_eff = buffers.nu_eff
             

@@ -98,7 +98,7 @@ function write_condition_file(
         println(io, "--- Boundary Conditions ---")
         function print_ext(label, bc)
             val_str = ""
-            if bc.velocity_type == Dirichlet || bc.velocity_type == Inlet || bc.velocity_type == SlidingWall
+            if bc.velocity_type == Dirichlet || bc.velocity_type == Inflow || bc.velocity_type == SlidingWall
                 v = bc.velocity_value
                 vx, vy, vz = v .* dim_params.U0
                 val_str = @sprintf("(%.2f, %.2f, %.2f)", vx, vy, vz)
@@ -111,8 +111,7 @@ function write_condition_file(
         print_ext("y_max:", bc_set.y_max)
         print_ext("z_min:", bc_set.z_min)
         print_ext("z_max:", bc_set.z_max)
-        @printf(io, "  %-22s %d\n", "Inlets:", length(bc_set.inlets))
-        @printf(io, "  %-22s %d\n", "Outlets:", length(bc_set.outlets))
+        @printf(io, "  %-22s %d\n", "Openings:", length(bc_set.openings))
         @printf(io, "  %-22s %d\n", "Internal Boundaries:", length(bc_set.internal_boundaries))
         println(io, "")
 

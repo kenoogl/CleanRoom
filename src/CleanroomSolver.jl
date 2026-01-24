@@ -118,9 +118,13 @@ function run_simulation(param_file::String)
         println("Loaded $(length(objects)) geometry objects.")
         fill_mask!(buffers.mask, objects, grid, "thread")
         apply_boundary_mask!(buffers.mask, grid, bc_set)
+        apply_internal_boundary_mask!(buffers.mask, grid, bc_set)
+        update_pressure_solve_mask!(buffers.mask, grid, bc_set, 1.0)
     else
         println("No geometry file found. Domain is empty.")
         apply_boundary_mask!(buffers.mask, grid, bc_set)
+        apply_internal_boundary_mask!(buffers.mask, grid, bc_set)
+        update_pressure_solve_mask!(buffers.mask, grid, bc_set, 1.0)
     end
     
     fill!(buffers.u, sim_params.initial_condition.velocity[1] / dim_params.U0) 
@@ -195,6 +199,20 @@ function run_simulation(param_file::String)
             rk_buffers=rk_buffers
         )
         time += dt_fixed
+
+        # Stability monitoring (CFL/Diffusion) every step
+        cfl = compute_cfl(buffers, grid, dt_fixed)
+        dx_min = min(grid.dx, grid.dy)
+        if !isempty(grid.dz)
+            dx_min = min(dx_min, minimum(grid.dz))
+        end
+        diff_num = nu_lam * dt_fixed / (dx_min^2)
+        if cfl > sim_params.courant_number || diff_num >= 0.5
+            println("Stability violation: CFL=$cfl, D=$diff_num")
+            if !sim_params.dry_run
+                break
+            end
+        end
         
         u_max = compute_u_max(buffers, grid)
         div_max, div_i, div_j, div_k = compute_divergence_max(buffers, grid)
@@ -229,6 +247,11 @@ function run_simulation(param_file::String)
             println("  Grid indices (with ghost): ($div_i, $div_j, $div_k)")
             println("  Velocity at location: u=$(buffers.u[div_i,div_j,div_k]), v=$(buffers.v[div_i,div_j,div_k]), w=$(buffers.w[div_i,div_j,div_k])")
             break
+        end
+
+        # Time averaging (Welford) after start time
+        if time >= sim_params.intervals.average_start_time_nd
+            update_time_average!(buffers, "thread")
         end
         
         if sim_params.intervals.instantaneous > 0 && step % sim_params.intervals.instantaneous == 0

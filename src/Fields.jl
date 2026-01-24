@@ -19,6 +19,7 @@ struct CFDBuffers
 
     # 圧力場
     p::Array{Float64, 3}      # 圧力
+    p_prev::Array{Float64, 3} # 前ステップ圧力（弱圧縮性項用）
 
     # 擬似速度（Fractional Step用）
     u_star::Array{Float64, 3}
@@ -138,6 +139,7 @@ function CFDBuffers(mx::Int, my::Int, mz::Int)
     return CFDBuffers(
         zeros_3d(), zeros_3d(), zeros_3d(), # u, v, w
         zeros_3d(),                         # p
+        zeros_3d(),                         # p_prev
         zeros_3d(), zeros_3d(), zeros_3d(), # u_star...
         zeros_3d(), zeros_3d(), zeros_3d(), # u_avg...
         Ref(0),                             # avg_count
@@ -183,8 +185,8 @@ function estimate_memory_size(
     cell_count = mx * my * mz
     bytes_per_cell = 8  # Float64
 
-    # CFDBuffers（必須）: 20配列
-    base_arrays = 20
+    # CFDBuffers（必須）: 21配列（p_prev含む）
+    base_arrays = 21
 
     # KrylovBuffers（反復法依存）
     krylov_arrays = 0

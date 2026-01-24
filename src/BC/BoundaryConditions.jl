@@ -4,15 +4,15 @@ using ..Common
 using ..Grid
 using ..Fields
 
-export VelocityBCType, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet
-export Dirichlet, Neumann, Outflow, Periodic, Symmetric, Wall, SlidingWall, Inlet 
+export VelocityBCType, ExternalBC, Opening, OpeningFlowType, InternalBoundary, BoundaryConditionSet
+export Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow 
 export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
 export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!
-export apply_face_velocity_bcs!, apply_boundary_mask!, apply_pressure_bcs!
-export apply_outflow_region!, update_outflow_mask!
+export apply_face_velocity_bcs!, apply_boundary_mask!, apply_internal_boundary_mask!, apply_pressure_bcs!
+export apply_outflow_region!, update_pressure_solve_mask!
 
 @enum VelocityBCType begin
-    Inlet
+    Inflow
     Dirichlet
     Neumann
     Outflow
@@ -22,17 +22,28 @@ export apply_outflow_region!, update_outflow_mask!
     SlidingWall
 end
 
+@enum OpeningFlowType begin
+    OpeningInlet
+    OpeningOutlet
+end
+
 struct ExternalBC
     velocity_type::VelocityBCType
     velocity_value::NTuple{3, Float64}
 end
 
-struct InletOutlet
-    type::Symbol
+struct Opening
+    name::String
+    type::Symbol               # :rectangular or :cylindrical
+    boundary::Symbol           # :x_min, :x_max, :y_min, :y_max, :z_min, :z_max
+    # rectangular
     position::NTuple{3, Float64}
     size::NTuple{2, Float64}
-    normal::NTuple{3, Int}
-    condition::VelocityBCType
+    # cylindrical
+    center::NTuple{3, Float64}
+    radius::Float64
+    # common
+    flow_type::OpeningFlowType
     velocity::NTuple{3, Float64}
 end
 
@@ -44,7 +55,6 @@ struct InternalBoundary
     radius::Float64
     height::Float64
     axis::Symbol
-    normal::NTuple{3, Int}
     velocity::NTuple{3, Float64}
 end
 
@@ -55,8 +65,7 @@ struct BoundaryConditionSet
     y_max::ExternalBC
     z_min::ExternalBC
     z_max::ExternalBC
-    inlets::Vector{InletOutlet}
-    outlets::Vector{InletOutlet}
+    openings::Vector{Opening}
     internal_boundaries::Vector{InternalBoundary}
 end
 
@@ -195,6 +204,40 @@ end
         return abs(z - position[3]) <= grid.dz[k] &&
                abs(x - position[1]) <= size[1] * 0.5 &&
                abs(y - position[2]) <= size[2] * 0.5
+    end
+    return false
+end
+
+@inline function is_in_opening(op::Opening, grid::GridData, i::Int, j::Int, k::Int)::Bool
+    x = grid.x[i]
+    y = grid.y[j]
+    z = grid.z_center[k]
+    face = op.boundary
+    if op.type == :rectangular
+        if face == :x_min || face == :x_max
+            return abs(x - op.position[1]) <= grid.dx &&
+                   abs(y - op.position[2]) <= op.size[1] * 0.5 &&
+                   abs(z - op.position[3]) <= op.size[2] * 0.5
+        elseif face == :y_min || face == :y_max
+            return abs(y - op.position[2]) <= grid.dy &&
+                   abs(x - op.position[1]) <= op.size[1] * 0.5 &&
+                   abs(z - op.position[3]) <= op.size[2] * 0.5
+        elseif face == :z_min || face == :z_max
+            return abs(z - op.position[3]) <= grid.dz[k] &&
+                   abs(x - op.position[1]) <= op.size[1] * 0.5 &&
+                   abs(y - op.position[2]) <= op.size[2] * 0.5
+        end
+    elseif op.type == :cylindrical
+        if face == :x_min || face == :x_max
+            return abs(x - op.center[1]) <= grid.dx &&
+                   (y - op.center[2])^2 + (z - op.center[3])^2 <= op.radius^2
+        elseif face == :y_min || face == :y_max
+            return abs(y - op.center[2]) <= grid.dy &&
+                   (x - op.center[1])^2 + (z - op.center[3])^2 <= op.radius^2
+        elseif face == :z_min || face == :z_max
+            return abs(z - op.center[3]) <= grid.dz[k] &&
+                   (x - op.center[1])^2 + (y - op.center[2])^2 <= op.radius^2
+        end
     end
     return false
 end
@@ -510,7 +553,7 @@ function set_boundary_value!(
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     
-    if type == Dirichlet || type == Inlet
+    if type == Dirichlet || type == Inflow
         if face == :x_min
              # Use mask from first internal cell (i=3)
              @inbounds for k in 1:mz, j in 1:my
@@ -682,7 +725,7 @@ function apply_velocity_bcs!(
 )
     # 1. External Boundaries
     function apply_ext(bc, face)
-        if bc.velocity_type == Dirichlet || bc.velocity_type == Inlet
+        if bc.velocity_type == Dirichlet || bc.velocity_type == Inflow
              set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], bc.velocity_type)
              set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], bc.velocity_type)
              set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], bc.velocity_type)
@@ -744,58 +787,37 @@ function apply_velocity_bcs!(
         apply_ext(bc_set.z_max, :z_max)
     end
     
-    # 2. Inlets
-    for inlet in bc_set.inlets
-        for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
-            x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
-            if inlet.type != :rectangular
-                error("Unsupported inlet type: $(inlet.type)")
-            end
-            in_range = is_in_rectangular_patch(
-                x, y, z,
-                inlet.position,
-                inlet.size,
-                inlet.normal,
-                grid,
-                k
-            )
-            if in_range
-                u[i, j, k] = inlet.velocity[1]
-                v[i, j, k] = inlet.velocity[2]
-                w[i, j, k] = inlet.velocity[3]
-            end
-        end
-    end
+    # 2. Openings (inlet/outlet patches on external boundaries)
+    for op in bc_set.openings
+        face = op.boundary
+        region_check = (i, j, k) -> is_in_opening(op, grid, i, j, k)
 
-    # 3. Outlets
-    for outlet in bc_set.outlets
-        if outlet.type != :rectangular
-            error("Unsupported outlet type: $(outlet.type)")
-        end
-        face = face_from_normal(outlet.normal)
-        region_check = (i, j, k) -> is_in_rectangular_patch(
-            grid.x[i],
-            grid.y[j],
-            grid.z_center[k],
-            outlet.position,
-            outlet.size,
-            outlet.normal,
-            grid,
-            k
-        )
-        if outlet.condition == Dirichlet
+        if op.flow_type == OpeningInlet
+            if any(isnan, op.velocity)
+                error("Opening inlet requires velocity.")
+            end
             for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
                 if region_check(i, j, k)
-                    u[i, j, k] = outlet.velocity[1]
-                    v[i, j, k] = outlet.velocity[2]
-                    w[i, j, k] = outlet.velocity[3]
+                    u[i, j, k] = op.velocity[1]
+                    v[i, j, k] = op.velocity[2]
+                    w[i, j, k] = op.velocity[3]
                 end
             end
-        elseif outlet.condition == Outflow
-            Uc = compute_region_average_velocity(u, v, w, grid, face, region_check)
-            apply_outflow_region!(u, grid, face, dt, Uc, region_check)
-            apply_outflow_region!(v, grid, face, dt, Uc, region_check)
-            apply_outflow_region!(w, grid, face, dt, Uc, region_check)
+        elseif op.flow_type == OpeningOutlet
+            if any(isnan, op.velocity)
+                Uc = compute_region_average_velocity(u, v, w, grid, face, region_check)
+                apply_outflow_region!(u, grid, face, dt, Uc, region_check)
+                apply_outflow_region!(v, grid, face, dt, Uc, region_check)
+                apply_outflow_region!(w, grid, face, dt, Uc, region_check)
+            else
+                for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+                    if region_check(i, j, k)
+                        u[i, j, k] = op.velocity[1]
+                        v[i, j, k] = op.velocity[2]
+                        w[i, j, k] = op.velocity[3]
+                    end
+                end
+            end
         end
     end
     
@@ -838,10 +860,10 @@ function apply_pressure_bcs!(
         apply_periodic_pressure!(p, grid, :y)
     else
         # y_min
-        p_type_min = (bc_set.y_min.velocity_type == Outflow) ? Dirichlet : Neumann
+        p_type_min = Neumann
         set_boundary_value!(p, grid, mask, :y_min, 0.0, p_type_min)
         # y_max
-        p_type_max = (bc_set.y_max.velocity_type == Outflow) ? Dirichlet : Neumann
+        p_type_max = Neumann
         set_boundary_value!(p, grid, mask, :y_max, 0.0, p_type_max)
     end
     # X-direction
@@ -849,10 +871,10 @@ function apply_pressure_bcs!(
         apply_periodic_pressure!(p, grid, :x)
     else
         # x_min
-        p_type_min = (bc_set.x_min.velocity_type == Outflow) ? Dirichlet : Neumann
+        p_type_min = Neumann
         set_boundary_value!(p, grid, mask, :x_min, 0.0, p_type_min)
         # x_max
-        p_type_max = (bc_set.x_max.velocity_type == Outflow) ? Dirichlet : Neumann
+        p_type_max = Neumann
         set_boundary_value!(p, grid, mask, :x_max, 0.0, p_type_max)
     end
     # Z-direction
@@ -860,10 +882,10 @@ function apply_pressure_bcs!(
         apply_periodic_pressure!(p, grid, :z)
     else
         # z_min
-        p_type_min = (bc_set.z_min.velocity_type == Outflow) ? Dirichlet : Neumann
+        p_type_min = Neumann
         set_boundary_value!(p, grid, mask, :z_min, 0.0, p_type_min)
         # z_max
-        p_type_max = (bc_set.z_max.velocity_type == Outflow) ? Dirichlet : Neumann
+        p_type_max = Neumann
         set_boundary_value!(p, grid, mask, :z_max, 0.0, p_type_max)
     end
 end
@@ -873,24 +895,8 @@ function apply_internal_pressure_bcs!(
     grid::GridData,
     bc_set::BoundaryConditionSet
 )
-    mx, my, mz = grid.mx, grid.my, grid.mz
-    for ib in bc_set.internal_boundaries
-        ni, nj, nk = ib.normal
-        di = (ni != 0) ? -ni : 0
-        dj = (nj != 0) ? -nj : 0
-        dk = (nk != 0) ? -nk : 0
-        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-            x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
-            if is_in_internal_boundary(ib, x, y, z)
-                src_i = i + di
-                src_j = j + dj
-                src_k = k + dk
-                if 1 <= src_i <= mx && 1 <= src_j <= my && 1 <= src_k <= mz
-                    p[i, j, k] = p[src_i, src_j, src_k]
-                end
-            end
-        end
-    end
+    # internal_boundaries are treated as solid (mask=0); no explicit pressure BC needed here
+    return
 end
 
 """
@@ -1151,7 +1157,7 @@ end
 
 外部境界条件に基づいてゴーストセルのマスク値を設定する。
 - Wall, Symmetric: 0.0 (Solid) -> Flux blocked
-- Inlet, Outflow, Neumann: 1.0 (Fluid) -> Flux allowed (handled by ghost cells)
+- Inflow, Outflow, Neumann: 1.0 (Fluid) -> Flux allowed (handled by ghost cells)
 """
 function apply_boundary_mask!(
     mask::Array{Float64, 3},
@@ -1191,14 +1197,29 @@ function apply_boundary_mask!(
     end
 end
 
-"""
-    update_outflow_mask!(mask, grid, bc_set, val)
+function apply_internal_boundary_mask!(
+    mask::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet
+)
+    for ib in bc_set.internal_boundaries
+        @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+            x, y, z = grid.x[i], grid.y[j], grid.z_center[k]
+            if is_in_internal_boundary(ib, x, y, z)
+                mask[i, j, k] = 0.0
+            end
+        end
+    end
+end
 
-Outflow境界のゴーストセルマスクを指定した値に変更する。
-- 圧力計算時: val = 0.0 (Solid) -> Neumann条件
-- 対流計算時: val = 1.0 (Fluid) -> 流れを許容
 """
-function update_outflow_mask!(
+    update_pressure_solve_mask!(mask, grid, bc_set, val)
+
+圧力計算時にInflow/Outflow/Opening境界のゴーストセルマスクを指定値に変更する。
+- 圧力計算時: val = 0.0
+- 対流計算時: val = 1.0
+"""
+function update_pressure_solve_mask!(
     mask::Array{Float64, 3},
     grid::GridData,
     bc_set::BoundaryConditionSet,
@@ -1222,12 +1243,61 @@ function update_outflow_mask!(
         end
     end
 
-    if bc_set.x_min.velocity_type == Outflow; set_val(:x_min); end
-    if bc_set.x_max.velocity_type == Outflow; set_val(:x_max); end
-    if bc_set.y_min.velocity_type == Outflow; set_val(:y_min); end
-    if bc_set.y_max.velocity_type == Outflow; set_val(:y_max); end
-    if bc_set.z_min.velocity_type == Outflow; set_val(:z_min); end
-    if bc_set.z_max.velocity_type == Outflow; set_val(:z_max); end
+    # External boundaries (full face)
+    if bc_set.x_min.velocity_type == Outflow || bc_set.x_min.velocity_type == Inflow; set_val(:x_min); end
+    if bc_set.x_max.velocity_type == Outflow || bc_set.x_max.velocity_type == Inflow; set_val(:x_max); end
+    if bc_set.y_min.velocity_type == Outflow || bc_set.y_min.velocity_type == Inflow; set_val(:y_min); end
+    if bc_set.y_max.velocity_type == Outflow || bc_set.y_max.velocity_type == Inflow; set_val(:y_max); end
+    if bc_set.z_min.velocity_type == Outflow || bc_set.z_min.velocity_type == Inflow; set_val(:z_min); end
+    if bc_set.z_max.velocity_type == Outflow || bc_set.z_max.velocity_type == Inflow; set_val(:z_max); end
+
+    # Openings (partial face)
+    for op in bc_set.openings
+        face = op.boundary
+        if face == :x_min
+            i_inner = 3
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                if is_in_opening(op, grid, i_inner, j, k)
+                    mask[1:2, j, k] .= val
+                end
+            end
+        elseif face == :x_max
+            i_inner = mx - 2
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                if is_in_opening(op, grid, i_inner, j, k)
+                    mask[mx-1:mx, j, k] .= val
+                end
+            end
+        elseif face == :y_min
+            j_inner = 3
+            @inbounds for k in 3:mz-2, i in 3:mx-2
+                if is_in_opening(op, grid, i, j_inner, k)
+                    mask[i, 1:2, k] .= val
+                end
+            end
+        elseif face == :y_max
+            j_inner = my - 2
+            @inbounds for k in 3:mz-2, i in 3:mx-2
+                if is_in_opening(op, grid, i, j_inner, k)
+                    mask[i, my-1:my, k] .= val
+                end
+            end
+        elseif face == :z_min
+            k_inner = 3
+            @inbounds for j in 3:my-2, i in 3:mx-2
+                if is_in_opening(op, grid, i, j, k_inner)
+                    mask[i, j, 1:2] .= val
+                end
+            end
+        elseif face == :z_max
+            k_inner = mz - 2
+            @inbounds for j in 3:my-2, i in 3:mx-2
+                if is_in_opening(op, grid, i, j, k_inner)
+                    mask[i, j, mz-1:mz] .= val
+                end
+            end
+        end
+    end
 end
 
 end # module BoundaryConditions

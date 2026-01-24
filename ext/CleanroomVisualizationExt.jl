@@ -16,6 +16,10 @@ function get_coords(grid::GridData, dim_params::DimensionParams)
     return x, y, z_center
 end
 
+@inline function clamp_internal_index(idx::Int, max_internal::Int)::Int
+    return clamp(idx, 1, max_internal) + 2
+end
+
 # Extend render_slice
 function Visualization.render_slice(
     buffers::CFDBuffers,
@@ -32,6 +36,11 @@ function Visualization.render_slice(
         return
     end
 
+    plot_vars = [v for v in config.variables if v == :velocity || v == :pressure]
+    if isempty(plot_vars)
+        return
+    end
+
     mkpath(config.output_dir)
     filename = "$(config.output_dir)/viz_$(lpad(step, 7, '0')).$(config.output_format)"
     
@@ -41,10 +50,7 @@ function Visualization.render_slice(
     
     # Slice Indexing
     idx = config.plane_index
-    if idx < 1 
-        idx = 1
-    end
-    
+
     # Prepare Data for Plotting
     # Needs to be a Matrix for Heatmap
     # X-axis, Y-axis, Values
@@ -56,14 +62,13 @@ function Visualization.render_slice(
     # Magnitude
     var_mag = sqrt.(var_u.^2 .+ var_v.^2 .+ var_w.^2)
     
-    title_str = "Step $step"
-    
-    fig = Figure(size = (1200, 500))
+    nplots = length(plot_vars)
+    fig = Figure(size = (600 * nplots, 600))
     
     # Plot Logic based on plane
     if config.plane == :xy
-        # XY plane at k = idx
-        if idx > grid.mz; idx = grid.mz; end
+        # XY plane at k = idx (internal index)
+        k = clamp_internal_index(idx, grid.mz - 4)
         
         # Slicing (excluding ghosts if we want strictly domain, but buffers includes ghosts)
         # grid.x is full including ghosts.
@@ -74,72 +79,98 @@ function Visualization.render_slice(
         
         X = x[valid_x]
         Y = y[valid_y]
-        Z_val = z[idx]
+        Z_val = z[k]
         
         # Extract 2D array
-        data_mag = var_mag[valid_x, valid_y, idx]
-        data_u   = var_u[valid_x, valid_y, idx]
-        data_v   = var_v[valid_x, valid_y, idx]
+        data_mag = var_mag[valid_x, valid_y, k]
+        data_u   = var_u[valid_x, valid_y, k]
+        data_v   = var_v[valid_x, valid_y, k]
+        data_p   = var_p[valid_x, valid_y, k]
         
-        ax = Axis(fig[1, 1], title = "Velocity Magnitude at Z=$(round(Z_val, digits=3)) m", xlabel="X [m]", ylabel="Y [m]", aspect=DataAspect())
-        hm = heatmap!(ax, X, Y, data_mag, colormap = :viridis)
-        Colorbar(fig[1, 2], hm, label = "Velocity [m/s]")
-        
-        if config.vector_enabled
-             # Downsample for arrows
-             skip = config.vector_skip
-             arrows2d!(ax, X[1:skip:end], Y[1:skip:end], data_u[1:skip:end, 1:skip:end], data_v[1:skip:end, 1:skip:end],
-                       tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
+        for (col, vname) in enumerate(plot_vars)
+            if vname == :velocity
+                ax = Axis(fig[1, col], title = "Velocity Magnitude at Z=$(round(Z_val, digits=3)) m", xlabel="X [m]", ylabel="Y [m]", aspect=DataAspect())
+                hm = heatmap!(ax, X, Y, data_mag, colormap = :viridis)
+                Colorbar(fig[2, col], hm, label = "Velocity [m/s]")
+                
+                if config.vector_enabled
+                    skip = config.vector_skip
+                    arrows2d!(ax, X[1:skip:end], Y[1:skip:end], data_u[1:skip:end, 1:skip:end], data_v[1:skip:end, 1:skip:end],
+                              tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
+                end
+            elseif vname == :pressure
+                ax = Axis(fig[1, col], title = "Pressure at Z=$(round(Z_val, digits=3)) m", xlabel="X [m]", ylabel="Y [m]", aspect=DataAspect())
+                hm = heatmap!(ax, X, Y, data_p, colormap = :plasma)
+                Colorbar(fig[2, col], hm, label = "Pressure [Pa]")
+            end
         end
         
     elseif config.plane == :xz
         # XZ plane at j = idx
-        if idx > grid.my; idx = grid.my; end
+        j = clamp_internal_index(idx, grid.my - 4)
         
         valid_x = 3:grid.mx-2
         valid_z = 3:grid.mz-2
         
         X = x[valid_x]
         Z = z[valid_z]
-        Y_val = y[idx]
+        Y_val = y[j]
         
-        data_mag = var_mag[valid_x, idx, valid_z]
-        data_u   = var_u[valid_x, idx, valid_z]
-        data_w   = var_w[valid_x, idx, valid_z]
+        data_mag = var_mag[valid_x, j, valid_z]
+        data_u   = var_u[valid_x, j, valid_z]
+        data_w   = var_w[valid_x, j, valid_z]
+        data_p   = var_p[valid_x, j, valid_z]
         
-        ax = Axis(fig[1, 1], title = "Velocity Magnitude at Y=$(round(Y_val, digits=3)) m", xlabel="X [m]", ylabel="Z [m]", aspect=DataAspect())
-        hm = heatmap!(ax, X, Z, data_mag, colormap = :viridis)
-        Colorbar(fig[1, 2], hm, label = "Velocity [m/s]")
-        
-        if config.vector_enabled
-             skip = config.vector_skip
-             arrows2d!(ax, X[1:skip:end], Z[1:skip:end], data_u[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end],
-                       tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
+        for (col, vname) in enumerate(plot_vars)
+            if vname == :velocity
+                ax = Axis(fig[1, col], title = "Velocity Magnitude at Y=$(round(Y_val, digits=3)) m", xlabel="X [m]", ylabel="Z [m]", aspect=DataAspect())
+                hm = heatmap!(ax, X, Z, data_mag, colormap = :viridis)
+                Colorbar(fig[2, col], hm, label = "Velocity [m/s]")
+                
+                if config.vector_enabled
+                    skip = config.vector_skip
+                    arrows2d!(ax, X[1:skip:end], Z[1:skip:end], data_u[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end],
+                              tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
+                end
+            elseif vname == :pressure
+                ax = Axis(fig[1, col], title = "Pressure at Y=$(round(Y_val, digits=3)) m", xlabel="X [m]", ylabel="Z [m]", aspect=DataAspect())
+                hm = heatmap!(ax, X, Z, data_p, colormap = :plasma)
+                Colorbar(fig[2, col], hm, label = "Pressure [Pa]")
+            end
         end
         
     elseif config.plane == :yz
          # YZ plane at i = idx
-        if idx > grid.mx; idx = grid.mx; end
+        i = clamp_internal_index(idx, grid.mx - 4)
         
         valid_y = 3:grid.my-2
         valid_z = 3:grid.mz-2
         
         Y = y[valid_y]
         Z = z[valid_z]
-        X_val = x[idx]
+        X_val = x[i]
         
-        data_mag = var_mag[idx, valid_y, valid_z]
-        data_v   = var_v[idx, valid_y, valid_z]
-        data_w   = var_w[idx, valid_y, valid_z]
+        data_mag = var_mag[i, valid_y, valid_z]
+        data_v   = var_v[i, valid_y, valid_z]
+        data_w   = var_w[i, valid_y, valid_z]
+        data_p   = var_p[i, valid_y, valid_z]
         
-        ax = Axis(fig[1, 1], title = "Velocity Magnitude at X=$(round(X_val, digits=3)) m", xlabel="Y [m]", ylabel="Z [m]", aspect=DataAspect())
-        hm = heatmap!(ax, Y, Z, data_mag, colormap = :viridis)
-        Colorbar(fig[1, 2], hm, label = "Velocity [m/s]")
-        
-        if config.vector_enabled
-             skip = config.vector_skip
-             arrows2d!(ax, Y[1:skip:end], Z[1:skip:end], data_v[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end],
-                       tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
+        for (col, vname) in enumerate(plot_vars)
+            if vname == :velocity
+                ax = Axis(fig[1, col], title = "Velocity Magnitude at X=$(round(X_val, digits=3)) m", xlabel="Y [m]", ylabel="Z [m]", aspect=DataAspect())
+                hm = heatmap!(ax, Y, Z, data_mag, colormap = :viridis)
+                Colorbar(fig[2, col], hm, label = "Velocity [m/s]")
+                
+                if config.vector_enabled
+                    skip = config.vector_skip
+                    arrows2d!(ax, Y[1:skip:end], Z[1:skip:end], data_v[1:skip:end, 1:skip:end], data_w[1:skip:end, 1:skip:end],
+                              tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
+                end
+            elseif vname == :pressure
+                ax = Axis(fig[1, col], title = "Pressure at X=$(round(X_val, digits=3)) m", xlabel="Y [m]", ylabel="Z [m]", aspect=DataAspect())
+                hm = heatmap!(ax, Y, Z, data_p, colormap = :plasma)
+                Colorbar(fig[2, col], hm, label = "Pressure [Pa]")
+            end
         end
     end
     

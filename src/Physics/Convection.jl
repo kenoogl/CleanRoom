@@ -47,7 +47,7 @@ end
     add_convection_flux!(buffers, grid, bc_set, par)
 
 Lax-Friedrichs flux splitting + WENO3 reconstruction.
-Explicitly adds convective flux for Inlet boundaries.
+Explicitly adds convective flux for Inflow boundaries.
 """
 function add_convection_flux!(
     buffers::CFDBuffers,
@@ -214,8 +214,8 @@ function add_convection_flux!(
         buffers.flux_w[i, j, k] -= flx / grid.dz[k]
         buffers.flux_w[i, j, k+1] += flx / grid.dz[k+1]
     end
-    # --- Inlet Boundary Correction ---
-    # Apply explicit convective flux for Inlet boundaries (where mask=0 zeroes out the flux)
+    # --- Inflow Boundary Correction ---
+    # Apply explicit convective flux for Inflow boundaries (where mask=0 zeroes out the flux)
     # Flux = u_bc * phi_bc * Area / Vol_cell? 
     # Finite Volume: d/dt(phi) = -1/Vol * sum(Flux * Area)
     # buffer.flux is "sum(Flux*Area)/Vol" term (or actually just d/dx term).
@@ -231,7 +231,7 @@ function add_convection_flux!(
     # Mask made it 0. So we need to SUBTRACT (-F_left)/dx => ADD F_left/dx.
     
     # x_min
-    if bc_set.x_min.velocity_type == Inlet
+    if bc_set.x_min.velocity_type == Inflow
         u_bc = bc_set.x_min.velocity_value[1]
         v_bc = bc_set.x_min.velocity_value[2]
         w_bc = bc_set.x_min.velocity_value[3]
@@ -245,7 +245,7 @@ function add_convection_flux!(
     end
     
     # x_max
-    if bc_set.x_max.velocity_type == Inlet
+    if bc_set.x_max.velocity_type == Inflow
         u_bc = bc_set.x_max.velocity_value[1]
         v_bc = bc_set.x_max.velocity_value[2]
         w_bc = bc_set.x_max.velocity_value[3]
@@ -261,7 +261,7 @@ function add_convection_flux!(
     end
 
     # y_min
-    if bc_set.y_min.velocity_type == Inlet
+    if bc_set.y_min.velocity_type == Inflow
         u_bc = bc_set.y_min.velocity_value[1]
         v_bc = bc_set.y_min.velocity_value[2]
         w_bc = bc_set.y_min.velocity_value[3]
@@ -275,7 +275,7 @@ function add_convection_flux!(
     end
     
     # y_max
-    if bc_set.y_max.velocity_type == Inlet
+    if bc_set.y_max.velocity_type == Inflow
         u_bc = bc_set.y_max.velocity_value[1]
         v_bc = bc_set.y_max.velocity_value[2]
         w_bc = bc_set.y_max.velocity_value[3]
@@ -289,7 +289,7 @@ function add_convection_flux!(
     end
 
     # z_min
-    if bc_set.z_min.velocity_type == Inlet
+    if bc_set.z_min.velocity_type == Inflow
         u_bc = bc_set.z_min.velocity_value[1]
         v_bc = bc_set.z_min.velocity_value[2]
         w_bc = bc_set.z_min.velocity_value[3]
@@ -303,7 +303,7 @@ function add_convection_flux!(
     end
     
     # z_max
-    if bc_set.z_max.velocity_type == Inlet
+    if bc_set.z_max.velocity_type == Inflow
         u_bc = bc_set.z_max.velocity_value[1]
         v_bc = bc_set.z_max.velocity_value[2]
         w_bc = bc_set.z_max.velocity_value[3]

@@ -122,10 +122,12 @@ function projection_step!(
     interpolate_to_faces!(buffers, grid, par)
     
     # 2. Divergence
-    compute_divergence!(buffers, grid, dt, par)
+    copyto!(buffers.p_prev, buffers.p)
+    compute_divergence!(buffers, grid, dt, poisson_config.mach2, par)
     
     # 3. Poisson
-    converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par)
+    alpha = poisson_config.mach2 / (dt * dt)
+    converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par, alpha)
     
     # 4. Correct
     correct_velocity!(buffers, grid, dt, par)

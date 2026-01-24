@@ -83,20 +83,22 @@ function interpolate_to_faces!(
 end
 
 """
-    compute_divergence!(buffers, grid, dt, par)
+    compute_divergence!(buffers, grid, dt, mach2, par)
 
 発散計算とポアソン右辺生成。
-rhs = (1/dt) * ∇·u*
+rhs = (1/dt) * ∇·u* - (M^2/Δt^2) * p^n
 """
 function compute_divergence!(
     buffers::CFDBuffers,
     grid::GridData,
     dt::Float64,
+    mach2::Float64,
     par::String
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
     inv_dt = 1.0 / dt
+    alpha = mach2 / (dt * dt)
     
     @inbounds for k in 3:mz-2
         dz = grid.dz[k]
@@ -115,7 +117,7 @@ function compute_divergence!(
                       (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy +
                       (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
                 
-                buffers.rhs[i, j, k] = div * inv_dt
+                buffers.rhs[i, j, k] = div * inv_dt - alpha * buffers.p_prev[i, j, k]
             end
         end
     end
@@ -256,16 +258,18 @@ function fractional_step!(
     interpolate_to_faces!(buffers, grid, par)
     
     # 4. Divergence / RHS
-    compute_divergence!(buffers, grid, dt, par)
+    copyto!(buffers.p_prev, buffers.p)
+    compute_divergence!(buffers, grid, dt, poisson_config.mach2, par)
     
     # 5. Poisson Solve
     # Temporarily set Outflow mask to 0.0 to enforce Neumann pressure BC (dp/dn=0)
-    update_outflow_mask!(buffers.mask, grid, bc_set, 0.0)
+    update_pressure_solve_mask!(buffers.mask, grid, bc_set, 0.0)
     
-    converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par)
+    alpha = poisson_config.mach2 / (dt * dt)
+    converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par, alpha)
     
     # Restore Outflow mask to 1.0 for Convection/Velocity update
-    update_outflow_mask!(buffers.mask, grid, bc_set, 1.0)
+    update_pressure_solve_mask!(buffers.mask, grid, bc_set, 1.0)
     
     # 6. Correct Velocity (Face and Center)
     correct_velocity!(buffers, grid, dt, par)

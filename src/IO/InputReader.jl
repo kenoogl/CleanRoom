@@ -5,7 +5,7 @@ using ..Common
 using ..Grid
 using ..Fields: estimate_memory_size
 using ..TimeIntegration
-using ..BoundaryConditions: Dirichlet, Neumann, Outflow, Periodic, Symmetric, Wall, SlidingWall, ExternalBC, InletOutlet, InternalBoundary, BoundaryConditionSet, Inlet
+using ..BoundaryConditions: Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow, Opening, OpeningFlowType, OpeningInlet, OpeningOutlet, ExternalBC, InternalBoundary, BoundaryConditionSet
 using ..PressureSolver
 using ..Visualization
 
@@ -124,6 +124,31 @@ function load_parameters(filepath::String)::SimulationParams
     smagorinsky_constant = Float64(get(data, :Smagorinsky_Constant, 0.2))
     div_max_threshold = Float64(get(data, :divMax_threshold, 1.0e-3))
 
+    # --- Weak Compressibility (Mach number) ---
+    mach_number = if haskey(data, :Mach_number)
+        Float64(data.Mach_number)
+    elseif haskey(data, :mach_number)
+        Float64(data.mach_number)
+    elseif haskey(data, :Sound_Speed)
+        c = Float64(data.Sound_Speed)
+        if c <= 0.0
+            error("Sound_Speed must be > 0.")
+        end
+        U0 / c
+    elseif haskey(data, :sound_speed)
+        c = Float64(data.sound_speed)
+        if c <= 0.0
+            error("sound_speed must be > 0.")
+        end
+        U0 / c
+    else
+        0.0
+    end
+    if mach_number < 0.0
+        error("Mach_number must be >= 0.")
+    end
+    mach2 = mach_number^2
+
     # --- Grid ---
     origin = parse_tuple3(data.Origin_of_Region)
     dom = data.Domain
@@ -205,7 +230,8 @@ function load_parameters(filepath::String)::SimulationParams
         Float64(p.coef_acceleration),
         Float64(p.convergence_criteria),
         Int(p.Iteration_max),
-        action_type
+        action_type,
+        mach2
     )
 
     # --- Initial Condition ---
@@ -258,9 +284,8 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
 
     function parse_bc(bc_data)
         vel_str = lowercase(String(bc_data.velocity))
-        bc_type = if vel_str == "dirichlet"; Dirichlet
-                  elseif vel_str == "inlet"; Inlet
-                  elseif vel_str == "neumann"; Neumann
+        bc_type = if vel_str == "inflow" || vel_str == "inlet"
+                      Inflow
                   elseif vel_str == "outflow"; Outflow
                   elseif vel_str == "periodic"; Periodic
                   elseif vel_str == "symmetric"; Symmetric
@@ -269,7 +294,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                   else; error("Unknown velocity BC type: $(vel_str)")
                   end
         val = (0.0, 0.0, 0.0)
-        if bc_type == Dirichlet || bc_type == Inlet || bc_type == SlidingWall
+        if bc_type == Inflow || bc_type == SlidingWall
             if !haskey(bc_data, :value)
                 error("$(bc_type) boundary requires value.")
             end
@@ -286,53 +311,29 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     z_min = parse_bc(data.external_boundaries.z_min)
     z_max = parse_bc(data.external_boundaries.z_max)
 
-    inlets = InletOutlet[]
-    if haskey(data, :inlets)
-        for item in data.inlets
-            shape_str = lowercase(String(item.type))
-            if shape_str != "rectangular"
-                error("Unsupported inlet type: $(shape_str)")
-            end
-            pos = parse_tuple3(item.position) ./ L0
-            sz = parse_tuple2(item.size) ./ L0
-            vel = parse_tuple3(item.velocity) ./ U0
-            push!(inlets, InletOutlet(
-                shape,
-                pos,
-                sz,
-                parse_tuple3_int(item.normal),
-                Dirichlet,
-                vel
-            ))
-        end
-    end
+    openings = Opening[]
+    if haskey(data, :openings)
+        for item in data.openings
+            name = String(get(item, :name, ""))
+            shape = Symbol(lowercase(String(item.type)))
+            boundary = Symbol(lowercase(String(item.boundary)))
+            flow_str = lowercase(String(item.flow_type))
+            flow_type = (flow_str == "inlet") ? OpeningInlet : OpeningOutlet
 
-    outlets = InletOutlet[]
-    if haskey(data, :outlets)
-        for item in data.outlets
-            shape_str = lowercase(String(item.type))
-            if shape_str != "rectangular"
-                error("Unsupported outlet type: $(shape_str)")
+            pos = haskey(item, :position) ? parse_tuple3(item.position) ./ L0 : (0.0, 0.0, 0.0)
+            sz = haskey(item, :size) ? parse_tuple2(item.size) ./ L0 : (0.0, 0.0)
+            center = haskey(item, :center) ? parse_tuple3(item.center) ./ L0 : (0.0, 0.0, 0.0)
+            radius = haskey(item, :radius) ? Float64(item.radius) / L0 : 0.0
+
+            vel = if haskey(item, :velocity)
+                parse_tuple3(item.velocity) ./ U0
+            else
+                (NaN, NaN, NaN)
             end
-            cond_str = lowercase(String(get(item, :condition, "outflow")))
-            bctype = (cond_str == "dirichlet") ? Dirichlet : Outflow
-            pos = parse_tuple3(item.position) ./ L0
-            sz = parse_tuple2(item.size) ./ L0
-            vel = (0.0, 0.0, 0.0)
-            if bctype == Dirichlet
-                if !haskey(item, :velocity)
-                    error("Outlet dirichlet requires velocity.")
-                end
-                vel = parse_tuple3(item.velocity) ./ U0
+            if flow_type == OpeningInlet && any(isnan, vel)
+                error("Opening inlet requires velocity.")
             end
-            push!(outlets, InletOutlet(
-                shape,
-                pos,
-                sz,
-                parse_tuple3_int(item.normal),
-                bctype,
-                vel
-            ))
+            push!(openings, Opening(name, shape, boundary, pos, sz, center, radius, flow_type, vel))
         end
     end
 
@@ -340,7 +341,6 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     if haskey(data, :internal_boundaries)
         for item in data.internal_boundaries
             shape_str = lowercase(String(item.type))
-            norm = parse_tuple3_int(item.normal)
             vel = parse_tuple3(item.velocity) ./ U0
             if shape_str == "rectangular"
                 region = item.region
@@ -349,7 +349,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                 push!(internal_bcs, InternalBoundary(
                     :rectangular, rmin, rmax,
                     (0.0,0.0,0.0), 0.0, 0.0, :z,
-                    norm, vel
+                    vel
                 ))
             elseif shape_str == "cylindrical"
                 cent = parse_tuple3(item.center) ./ L0
@@ -363,7 +363,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                 push!(internal_bcs, InternalBoundary(
                     :cylindrical, (0.0,0.0,0.0), (0.0,0.0,0.0),
                     cent, rad, h, ax,
-                    norm, vel
+                    vel
                 ))
             else
                 error("Unknown internal boundary type: $(shape_str)")
@@ -373,7 +373,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
 
     return BoundaryConditionSet(
         x_min, x_max, y_min, y_max, z_min, z_max,
-        inlets, outlets, internal_bcs
+        openings, internal_bcs
     )
 end
 

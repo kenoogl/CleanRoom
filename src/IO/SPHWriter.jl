@@ -73,7 +73,9 @@ function write_sph_header(
     z0 = Float32((grid.z_center[3] - grid.dz[3]/2) * dim_params.L0)
     dx = Float32(grid.dx * dim_params.L0)
     dy = Float32(grid.dy * dim_params.L0)
-    dz = Float32(grid.dz[3] * dim_params.L0) # Using first cell dz
+    # 非等間隔Zの場合: Lz = z_{Nz+3} - z_{3}, DZ = Lz / Nz
+    Lz = (grid.z_face[end-2] - grid.z_face[3]) * dim_params.L0
+    dz = Float32(Lz / (grid.mz-4))
     
     write_record(io, t_val, stp, x0, y0, z0, dx, dy, dz)
 end
@@ -100,32 +102,10 @@ function write_sph_vector(
     open(filepath, "w") do io
         write_sph_header(io, Int32(2), Int32(1), grid, step, time, dim_params)
         
-        # Interleave u, v, w? Or u block, v block, w block?
-        # V-Isio Vector standard: u, v, w interleaved (u1, v1, w1, u2, ...) ?
-        # Or Block?
-        # "Fortran unformatted" usually implies one huge record array.
-        # Often (u, v, w) separate records or one record (u,v,w).
-        # Common convention: u, then v, then w.
-        # Checking similar codes (H2 reference): Block format (u array, v array, w array).
-        # But if svType=2 (Vector), it might expect vector per point.
-        # I'll write u, v, w as separate records or one combined?
-        # Safest "One Record" containing u,v,w concatenated.
-        # Or (u, v, w) interleaved.
-        # Let's write separate records for safety or interleaved?
-        # Interleaved is common for "Vector Field".
-        # But Arrays in Julia are column major.
-        # I'll create a single buffer of size 3*N.
-        
-        data = Vector{Float32}(undef, 3 * nx * ny * nz)
-        idx = 1
-        # Loop order x, y, z (Julia standard)
-        for k in 1:nz, j in 1:ny, i in 1:nx
-             data[idx]   = u_out[i,j,k]
-             data[idx+1] = v_out[i,j,k]
-             data[idx+2] = w_out[i,j,k]
-             idx += 3
-        end
-        write_array_record(io, data)
+        # u, v, w の順に配列を記述（ブロック形式）
+        write_array_record(io, vec(u_out))
+        write_array_record(io, vec(v_out))
+        write_array_record(io, vec(w_out))
     end
 end
 

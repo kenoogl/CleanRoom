@@ -11,7 +11,7 @@ export SolverType, DivergenceAction, PoissonConfig
 export RedBlackSOR, CG, BiCGSTAB, WarnContinue, Abort
 export solve_poisson!
 
-const PRECONDITIONER_SWEEPS = 5
+const PRECONDITIONER_SWEEPS = 4
 
 @enum SolverType begin
     RedBlackSOR
@@ -30,6 +30,7 @@ struct PoissonConfig
     tol::Float64               # 収束判定値
     max_iter::Int              # 最大反復回数
     on_divergence::DivergenceAction  # 収束失敗時の動作
+    mach2::Float64             # 弱圧縮性係数 M^2
 end
 
 
@@ -44,15 +45,16 @@ function solve_poisson!(
     grid::GridData,
     config::PoissonConfig,
     bc_set,  # Union{Nothing, BoundaryConditionSet} - for periodic BC
-    par::String
+    par::String,
+    alpha::Float64 = 0.0
 )::Tuple{Bool, Int, Float64}
     # Solver dispatch
     result = if config.solver == RedBlackSOR
-        solve_poisson_sor!(buffers, grid, config, bc_set, par)
+        solve_poisson_sor!(buffers, grid, config, bc_set, par, alpha)
     elseif config.solver == CG
-        solve_poisson_cg!(buffers, grid, config, bc_set, par)
+        solve_poisson_cg!(buffers, grid, config, bc_set, par, alpha)
     elseif config.solver == BiCGSTAB
-        solve_poisson_bicgstab!(buffers, grid, config, bc_set, par)
+        solve_poisson_bicgstab!(buffers, grid, config, bc_set, par, alpha)
     else
         error("Unknown solver type: $(config.solver)")
     end
@@ -60,7 +62,7 @@ function solve_poisson!(
     converged, iter, residual = result
 
     # Mean pressure subtraction
-    # Since we use Neumann BCs for pressure on all boundaries (via mask=0),
+    # Since we use Neumann BCs for pressure on all non-periodic boundaries (via mask=0),
     # the pressure solution is unique only up to a constant.
     # We must enforce mean(p) = 0 (or some reference) to prevent drift.
     mx, my, mz = grid.mx, grid.my, grid.mz
@@ -91,7 +93,7 @@ function solve_poisson!(
 end
 
 """
-    solve_poisson_sor!(buffers, grid, config, bc_set, par)
+    solve_poisson_sor!(buffers, grid, config, bc_set, par, alpha)
     
 Red-Black SOR法による実装
 参考: /Users/Daily/Development/H2/src/NonUniform.jl (rbsor_core!, rbsor!, solveSOR!)
@@ -101,7 +103,8 @@ function solve_poisson_sor!(
     grid::GridData,
     config::PoissonConfig,
     bc_set,
-    par::String
+    par::String,
+    alpha::Float64
 )::Tuple{Bool, Int, Float64}
     
     mx, my, mz = grid.mx, grid.my, grid.mz
@@ -119,7 +122,7 @@ function solve_poisson_sor!(
         apply_pressure_bcs!(p, grid, mask, bc_set)
     end
 
-    res0 = compute_residual_sor(p, rhs, mask, grid, config.omega)
+    res0 = compute_residual_sor(p, rhs, mask, grid, config.omega, alpha)
     if res0 == 0.0
         res0 = 1.0
     end
@@ -169,7 +172,7 @@ function solve_poisson_sor!(
                     cond_zp = base_cz_p * (m_zp * m0)
                     
                     # Diagonal term
-                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
                     
                     # RHS term
                     b_val = rhs[i, j, k] * vol
@@ -195,7 +198,7 @@ function solve_poisson_sor!(
         # Compute residual with consistent ghost cells
         # Note: omega is not used in residual calculation (just normalization scale if needed, but we use true residual)
         # We reuse compute_residual_sor which calculates true residual norm
-        current_res_norm = compute_residual_sor(p, rhs, mask, grid, config.omega)
+        current_res_norm = compute_residual_sor(p, rhs, mask, grid, config.omega, alpha)
         residual = current_res_norm / res0
         
         if residual < config.tol
@@ -208,7 +211,7 @@ function solve_poisson_sor!(
 end
 
 """
-    solve_poisson_cg!(buffers, grid, config, bc_set, par)
+    solve_poisson_cg!(buffers, grid, config, bc_set, par, alpha)
     
 Conjugate Gradient法による実装
 参考: /Users/Daily/Development/H2/src/NonUniform.jl (CG!)
@@ -218,7 +221,8 @@ function solve_poisson_cg!(
     grid::GridData,
     config::PoissonConfig,
     bc_set,
-    par::String
+    par::String,
+    helm_alpha::Float64
 )::Tuple{Bool, Int, Float64}
     
     mx, my, mz = grid.mx, grid.my, grid.mz
@@ -235,13 +239,13 @@ function solve_poisson_cg!(
     z = buffers.nu_t         # Preconditioned residual (temporary)
     
     # 1. Compute initial residual: r = b - Ap
-    res0 = calc_residual_cg!(r, p, rhs, mask, grid, par)
+    res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, helm_alpha)
     if res0 == 0.0
         return (true, 0, 0.0)
     end
     
     # 2. Preconditioner: z = M^-1 r (Gauss-Seidel)
-    apply_preconditioner!(z, r, mask, grid)
+    apply_preconditioner!(z, r, mask, grid, helm_alpha)
     
     # 3. p = z
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
@@ -259,7 +263,7 @@ function solve_poisson_cg!(
         iter = itr
         
         # 4. q = A * p
-        calc_laplacian_cg!(q, pk, mask, grid, par)
+        calc_laplacian_cg!(q, pk, mask, grid, par, helm_alpha)
         
         # 5. alpha = rho_old / (p·q)
         pq = dot_product_cg(pk, q, mask, grid, par)
@@ -269,13 +273,13 @@ function solve_poisson_cg!(
             break
         end
         
-        alpha = rho_old / pq
+        alpha_k = rho_old / pq
         
         # 6 & 7. x = x + alpha * p,  r = r - alpha * q
         @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
             m0 = mask[i, j, k]
-            p[i, j, k] += alpha * pk[i, j, k] * m0
-            r[i, j, k] -= alpha * q[i, j, k] * m0
+            p[i, j, k] += alpha_k * pk[i, j, k] * m0
+            r[i, j, k] -= alpha_k * q[i, j, k] * m0
         end
         
         # 8. res = ||r|| / res0
@@ -288,7 +292,7 @@ function solve_poisson_cg!(
         end
         
         # 9. Preconditioner: z = M^-1 r
-        apply_preconditioner!(z, r, mask, grid)
+        apply_preconditioner!(z, r, mask, grid, helm_alpha)
         
         # 10. rho_new = r·z
         rho_new = dot_product_cg(r, z, mask, grid, par)
@@ -317,16 +321,17 @@ end
 
 
 """
-    calc_laplacian_cg!(Ap, p, mask, grid, par)
+    calc_laplacian_cg!(Ap, p, mask, grid, par, alpha)
     
-Compute Ap = -∇²p (Laplacian operator for pressure Poisson equation)
+Compute Ap = -∇²p - α p (Helmholtz operator for weak compressibility)
 """
 function calc_laplacian_cg!(
     Ap::Array{Float64, 3},
     p::Array{Float64, 3},
     mask::Array{Float64, 3},
     grid::GridData,
-    par::String
+    par::String,
+    alpha::Float64
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
@@ -341,6 +346,7 @@ function calc_laplacian_cg!(
         base_cy = (dx * dz_k) / dy
         base_cx = (dy * dz_k) / dx
         
+        vol = dx * dy * dz_k
         for j in 3:my-2, i in 3:mx-2
             m0 = mask[i, j, k]
             
@@ -358,7 +364,7 @@ function calc_laplacian_cg!(
             cond_zm = base_cz_m * (m_zm * m0)
             cond_zp = base_cz_p * (m_zp * m0)
             
-            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
             
             ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
@@ -372,7 +378,7 @@ end
 
 
 """
-    calc_residual_cg!(r, p, rhs, mask, grid, par)
+    calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
     
 Compute residual r = b - Ap and return ||r||
 """
@@ -382,7 +388,8 @@ function calc_residual_cg!(
     rhs::Array{Float64, 3},
     mask::Array{Float64, 3},
     grid::GridData,
-    par::String
+    par::String,
+    alpha::Float64
 )::Float64
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
@@ -417,7 +424,7 @@ function calc_residual_cg!(
             cond_zm = base_cz_m * (m_zm * m0)
             cond_zp = base_cz_p * (m_zp * m0)
             
-            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
             
             ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
@@ -437,16 +444,17 @@ function calc_residual_cg!(
 end
 
 """
-    compute_residual_sor(p, rhs, mask, grid, omega)
+    compute_residual_sor(p, rhs, mask, grid, omega, alpha)
 
-Compute SOR residual norm (H2-style) for normalization.
+Compute SOR residual norm (H2-style) for normalization (Helmholtz対応).
 """
 function compute_residual_sor(
     p::Array{Float64, 3},
     rhs::Array{Float64, 3},
     mask::Array{Float64, 3},
     grid::GridData,
-    omega::Float64
+    omega::Float64,
+    alpha::Float64
 )::Float64
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
@@ -472,7 +480,7 @@ function compute_residual_sor(
         cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
         cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
-        dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+        dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
         ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
              cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
              cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
@@ -487,7 +495,7 @@ function compute_residual_sor(
 end
 
 """
-    apply_preconditioner!(z, r, mask, grid)
+    apply_preconditioner!(z, r, mask, grid, alpha)
 
 Apply Gauss-Seidel preconditioner to solve M z = r.
 """
@@ -495,7 +503,8 @@ function apply_preconditioner!(
     z::Array{Float64, 3},
     r::Array{Float64, 3},
     mask::Array{Float64, 3},
-    grid::GridData
+    grid::GridData,
+    alpha::Float64
 )
     fill!(z, 0.0)
     dx, dy = grid.dx, grid.dy
@@ -513,6 +522,7 @@ function apply_preconditioner!(
                 base_cz_m = (dx * dy) / dZ_m
                 base_cy = (dx * dz_k_val) / dy
                 base_cx = (dy * dz_k_val) / dx
+                vol = dx * dy * dz_k_val
                 @simd for i in (3 + (j + k + color + 1) % 2):2:mx-2
                     m0 = mask[i, j, k]
                     
@@ -523,7 +533,7 @@ function apply_preconditioner!(
                     cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
                     cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
-                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp)
+                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
                     ss = cond_xm * z[i-1, j, k] + cond_xp * z[i+1, j, k] +
                          cond_ym * z[i, j-1, k] + cond_yp * z[i, j+1, k] +
                          cond_zm * z[i, j, k-1] + cond_zp * z[i, j, k+1]
@@ -588,21 +598,141 @@ end
 
 
 """
-    solve_poisson_bicgstab!(buffers, grid, config, bc_set, par)
+    solve_poisson_bicgstab!(buffers, grid, config, bc_set, par, alpha)
     
-BiCGSTAB法による実装 (Placeholder)
+BiCGSTAB法による実装（前処理付き）
 """
 function solve_poisson_bicgstab!(
     buffers::CFDBuffers,
     grid::GridData,
     config::PoissonConfig,
     bc_set,
-    par::String
+    par::String,
+    alpha::Float64
 )::Tuple{Bool, Int, Float64}
-    # TODO: Implement BiCGSTAB solver
-    # error("BiCGSTAB solver not implemented yet")
-    println("WARNING: BiCGSTAB solver called but not implemented. Doing nothing.")
-    return (false, 0, 1.0)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+
+    p = buffers.p
+    rhs = buffers.rhs
+    mask = buffers.mask
+
+    # Work vectors (reuse existing buffers)
+    r = buffers.flux_u       # residual / s
+    r_hat = buffers.p_prev   # shadow residual
+    pvec = buffers.flux_v    # search direction
+    v = buffers.flux_w       # A * phat
+    phat = buffers.nu_t      # M^-1 * p
+    shat = buffers.nu_eff    # M^-1 * s
+    t = buffers.rhs          # reuse rhs as temporary for t = A * shat
+
+    # Initial residual r = b - A p
+    res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
+    if res0 == 0.0
+        return (true, 0, 0.0)
+    end
+
+    copyto!(r_hat, r)
+    fill!(pvec, 0.0)
+    fill!(v, 0.0)
+
+    rho_old = 1.0
+    alpha_k = 1.0
+    omega_k = 1.0
+    converged = false
+    iter = 0
+    residual = 1.0
+
+    for itr in 1:config.max_iter
+        iter = itr
+
+        rho_new = dot_product_cg(r_hat, r, mask, grid, par)
+        if abs(rho_new) < 1e-30
+            break
+        end
+
+        if itr == 1
+            @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+                pvec[i, j, k] = r[i, j, k]
+            end
+        else
+            beta = (rho_new / rho_old) * (alpha_k / omega_k)
+            @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+                pvec[i, j, k] = r[i, j, k] + beta * (pvec[i, j, k] - omega_k * v[i, j, k])
+            end
+        end
+
+        # phat = M^-1 p
+        apply_preconditioner!(phat, pvec, mask, grid, alpha)
+
+        # v = A * phat
+        calc_laplacian_cg!(v, phat, mask, grid, par, alpha)
+
+        denom = dot_product_cg(r_hat, v, mask, grid, par)
+        if abs(denom) < 1e-30
+            break
+        end
+        alpha_k = rho_new / denom
+
+        # s = r - alpha * v (store in r)
+        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k]
+            r[i, j, k] = (r[i, j, k] - alpha_k * v[i, j, k]) * m0
+        end
+
+        # Check convergence with s
+        residual = sqrt(dot_self_cg(r, mask, grid, par)) / res0
+        if residual < config.tol
+            @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+                m0 = mask[i, j, k]
+                p[i, j, k] += alpha_k * phat[i, j, k] * m0
+            end
+            converged = true
+            break
+        end
+
+        # shat = M^-1 s
+        apply_preconditioner!(shat, r, mask, grid, alpha)
+
+        # t = A * shat (reuse rhs array)
+        calc_laplacian_cg!(t, shat, mask, grid, par, alpha)
+
+        t_dot_s = dot_product_cg(t, r, mask, grid, par)
+        t_dot_t = dot_product_cg(t, t, mask, grid, par)
+        if abs(t_dot_t) < 1e-30
+            break
+        end
+        omega_k = t_dot_s / t_dot_t
+
+        # x = x + alpha * phat + omega * shat
+        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k]
+            p[i, j, k] += (alpha_k * phat[i, j, k] + omega_k * shat[i, j, k]) * m0
+        end
+
+        # r = s - omega * t  (s is in r)
+        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k]
+            r[i, j, k] = (r[i, j, k] - omega_k * t[i, j, k]) * m0
+        end
+
+        residual = sqrt(dot_self_cg(r, mask, grid, par)) / res0
+        if residual < config.tol
+            converged = true
+            break
+        end
+
+        if abs(omega_k) < 1e-30
+            break
+        end
+
+        rho_old = rho_new
+    end
+
+    if !isnothing(bc_set)
+        apply_pressure_bcs!(p, grid, mask, bc_set)
+    end
+
+    return (converged, iter, residual)
 end
 
 end # module PressureSolver
