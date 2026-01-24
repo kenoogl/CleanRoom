@@ -186,10 +186,10 @@ flowchart TB
     E --> E2[Apply BCs to Pseudo Velocity]
     E2 --> F[Interpolate to Cell Faces]
     F --> G[Compute Divergence]
-    G --> H_mask[Temporarily Mask Outflow as 0.0]
+    G --> H_mask[set_pressure_solve_mask: true]
     H_mask --> H[Solve Poisson Equation]
     H --> I{Converged?}
-    I -->|Yes| J_unmask[Restore Outflow Mask to 1.0]
+    I -->|Yes| J_unmask[set_pressure_solve_mask: false]
     J_unmask --> J[Correct Velocity]
     I -->|No| K[Iteration Limit?]
     K -->|No| H
@@ -209,15 +209,15 @@ flowchart TB
 | 1.1-1.7 | 計算格子生成 | Grid | GridConfig | Grid Generation |
 | 2.1-2.3 | 支配方程式・LES | Convection, Diffusion, Turbulence | FluxInterface | TimeLoop |
 | 3.1-3.4 | 無次元化 | Common, Fields | DimensionConverter | Initialization, Output |
-| 4.1-4.5 | 空間離散化WENO3 | Convection | WENO3Reconstructor | Flux Computation |
+| 4.1-4.9 | 空間離散化WENO3 | Convection | WENO3Reconstructor | Flux Computation |
 | 5.1-5.3 | 時間積分 | TimeIntegration | TimeSchemeInterface | TimeLoop |
-| 6.1-6.5 | 圧力-速度分離 | FractionalStep | FracStepInterface | FracStep Flow |
-| 7.1-7.6 | 圧力ポアソン | PressureSolver | PoissonInterface | Poisson Solve |
-| 8.1-8.6 | 境界条件 | BoundaryConditions | BCInterface | BC Application |
+| 6.1-6.13 | 圧力-速度分離 | FractionalStep | FracStepInterface | FracStep Flow |
+| 7.1-7.9 | 圧力ポアソン・収束処理 | PressureSolver | PoissonInterface | Poisson Solve |
+| 8.1-8.8 | 境界条件・Opening | BoundaryConditions | BCInterface, Opening | BC Application |
 | 9.1-9.8 | 物体表現 | Geometry | GeometryInterface | Preprocessing |
 | 10.1 | HALO領域 | Grid, Fields | HALOInterface | Grid Generation |
 | 11.1-11.18 | 入出力 | InputReader, SPHWriter, Checkpoint | IOInterface | IO Operations |
-| 12.1-12.7 | 可視化 | Visualization | VizInterface | Visualization |
+| 12.1-12.8 | 可視化 | Visualization | VizInterface | Visualization |
 
 ---
 
@@ -301,9 +301,9 @@ end
 - セル中心配列サイズ: (Nx+4, Ny+4, Nz+4) — WENO3の5点ステンシルに対応し、各軸両側に2セルずつゴーストセル
 
 **HALO領域とゴーストセルの設計方針**
-- **要件（Req 10.1）**: 将来の分散並列計算に備え、Z方向のみHALO領域を確保
+- **要件（Req 10.1）**: HALO/ゴーストセル/ガイドセルは同義とし、XYZ全方向にステンシル幅分（2セル）確保する
 - **設計**: WENO3スキームの5点ステンシルを満たすため、全軸にゴーストセル（各軸両側2セル）を設置
-- **整合性**: Z方向HALOは格子ファイルで明示的に指定（Nz+5点）。XY方向ゴーストセルは等間隔格子であるため境界条件から自動外挿で対応。将来の分散並列化時には、Z方向HALOを通信領域として使用可能
+- **整合性**: Z方向のみ非等間隔格子を許可するため、Zはファイル入力、XYは等間隔生成でHALO座標を補う
 
 **Dependencies**
 - Inbound: Fields, Convection, Diffusion — 格子情報参照 (P0)
@@ -355,6 +355,11 @@ function read_z_grid_file(filepath::String, Nz::Int, origin_z::Float64)::Vector{
     # Preconditions: ファイル存在、フォーマット正常、格子点数 == Nz+5
     # Postconditions: Nz+5点のセル界面座標を返す（絶対座標）
     # Error: 格子点数 != Nz+5 の場合はエラー終了
+    #
+    # ファイルフォーマット:
+    #   1行目: 格子点数（Nz+5）
+    #   2行目以降: "<番号> <座標値>"（1オリジン連番）
+    #   座標値はOrigin_of_Region[3]からの相対座標[m]
     #
     # 座標変換:
     #   ファイル内の座標値はOrigin_of_Region[3]（origin_z）からの相対座標[m]
@@ -541,6 +546,7 @@ end
 - 非等間隔格子対応WENO3再構成
 - 各軸独立にf⁺/f⁻を再構成
 - 壁面境界: マスク値を用いて壁面速度をゼロとして対流フラックスを計算
+- WENO3再構成の入力はセル平均値として扱う
 
 **壁面・流入境界での対流フラックス処理**
 - セルフェイスにおいて隣接セルが物体（mask=0）の場合、その方向の速度をゼロとみなす
@@ -559,13 +565,29 @@ end
 ##### Service Interface
 
 ```julia
-# WENO3再構成（左側再構成）
+# WENO3再構成（左側再構成、f⁺用）
 function weno3_reconstruct_left(
     u_im1::Float64, u_i::Float64, u_ip1::Float64,
     dx_im1::Float64, dx_i::Float64, dx_ip1::Float64
 )::Float64
     # 非等間隔格子WENO3再構成（requirements.md準拠）
     # Returns: u⁻_{i+1/2}
+    #
+    # Stencil 0: {i-1, i}, Stencil 1: {i, i+1}
+end
+
+# WENO3再構成（右側再構成、f⁻用）
+function weno3_reconstruct_right(
+    u_i::Float64, u_ip1::Float64, u_ip2::Float64,
+    dx_i::Float64, dx_ip1::Float64, dx_ip2::Float64
+)::Float64
+    # 非等間隔格子WENO3再構成（右から左へ、f⁻用）
+    # Returns: u⁺_{i+1/2}
+    #
+    # weno3_reconstruct_leftの左右反転ステンシル:
+    #   Stencil 0: {i, i+1}, Stencil 1: {i+1, i+2}
+    #
+    # 再構成係数は左側再構成と対称的に計算
 end
 
 # 対流フラックス計算（flux配列に加算）
@@ -600,6 +622,7 @@ end
 - **フラックス補正**: マスク0化に伴う拡散項の過小評価を防ぐため、以下の補正を行う
   - Wall/SlidingWall: 壁面せん断流束を加算
   - Inlet: 流入境界値との差分に基づく流束を加算
+- Outflow境界では粘性項をゼロとし、対流項のみで流出条件を与える
 
 **壁面境界での拡散フラックス処理**
 - 壁面（mask=0）に隣接するセルフェイスでは、速度勾配をゼロとみなす
@@ -680,8 +703,15 @@ end
 - CG/BiCGSTAB（オプション）
 - 反復ループ内での `apply_pressure_bcs!` 呼び出しによる境界条件（Neumann/Periodic等）のリアルタイム更新
 - 真の残差 $|b - Ax|$ に基づく収束判定
-- CG/BiCGSTABは前処理付き（Gauss-Seidel 5 sweep）共役勾配法で収束判定
-- **圧力平均値の引き戻し**: 全境界がNeumannとなるため、常に全セルから平均値を減算してドリフトを防止
+- CG/BiCGSTABは前処理付き共役勾配法
+- **前処理（対称Gauss-Seidel）**:
+  - 対称Gauss-Seidel前処理: 前進スイープ → 後退スイープを交互に実行
+  - `PRECONDITIONER_ITERATION = 4`（ハードコード）: 前進2回 + 後退2回（対称性を保持、Gauss-Seidel 4 sweep）
+  - 各スイープでRed-Black順序を使用し並列化可能
+  - 前処理行列 M ≈ (D + L) D⁻¹ (D + U) の近似逆行列として作用
+- **圧力平均値の引き戻し**: Periodic境界では周期条件、それ以外はNeumann条件のため、圧力場の定数不定性によるドリフトを防ぐ目的で常に全セル平均を減算する
+- 圧力平均値の引き戻しでは mask=0（物体セル）を平均計算から除外する
+- 残差は初期残差で正規化（H2方式）して収束判定する
 
 **Dependencies**
 - Inbound: FractionalStep — ポアソン解法呼び出し (P0)
@@ -693,6 +723,9 @@ end
 ##### Service Interface
 
 ```julia
+# 前処理パラメータ（ハードコード）
+const PRECONDITIONER_ITERATION = 4  # 対称Gauss-Seidel反復回数（偶数で対称性保持）
+
 @enum SolverType begin
     RedBlackSOR
     CG
@@ -719,10 +752,24 @@ function solve_poisson!(
     par::String
 )::Tuple{Bool, Int, Float64}
     # Returns: (収束フラグ, 反復回数, 最終残差)
-    # Postconditions: 
+    # Postconditions:
     #   1. 反復計算（apply_pressure_bcs! をループ内で適宜呼び出し）
     #   2. 常に平均値を引き戻し（ドリフト防止）
     #   3. buffers.p に最終的な圧力場を格納
+end
+
+# 圧力境界条件の適用（反復ループ内で呼び出し）
+function apply_pressure_bcs!(
+    p::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    par::String
+)
+    # 各外部境界に対して:
+    #   - Periodic: 対向ゴーストセル間で値を交換
+    #   - その他（Wall/Symmetric/Inflow/Outflow/Opening）: Neumann条件（∂p/∂n=0）
+    #     → ゴーストセルに隣接内部セルの値をコピー
+    # 物体セル（mask=0）: ポアソン方程式の離散化で自然にNeumann条件が満たされる
 end
 ```
 
@@ -765,10 +812,29 @@ function fractional_step!(
     # 1. compute_pseudo_velocity!
     # 2. interpolate_to_faces!
     # 3. compute_divergence!
-    # 4. update_outflow_mask!(mask, 0.0)  # Temporarily set mask to 0 for pressure
+    # 4. set_pressure_solve_mask!(mask, grid, bc_set, true)   # 圧力計算用にマスク変更
     # 5. solve_poisson!
-    # 6. update_outflow_mask!(mask, 1.0)  # Restore mask to 1 for velocity update
+    # 6. set_pressure_solve_mask!(mask, grid, bc_set, false)  # マスクを復元
     # 7. correct_velocity!
+end
+
+# 圧力計算用にInflow/Outflow/Opening境界のマスク値を設定
+function set_pressure_solve_mask!(
+    mask::Array{Float64, 3},
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    for_pressure::Bool  # true: 圧力計算用(mask=0)、false: 復元(mask=1)
+)
+    value = for_pressure ? 0.0 : 1.0
+
+    # bc_set内の流れ境界に該当するゴーストセルのマスク値を更新
+    # 対象境界:
+    #   - 外部境界: velocity_type が Inflow, Outflow, Opening のもの
+    #   - Opening: openings配列の各要素が指定するセル領域
+    #
+    # 用途:
+    #   - for_pressure=true:  圧力ポアソン方程式でNeumann条件を自然に満たすため
+    #   - for_pressure=false: 速度補正・対流計算でゴーストセル値を有効にするため
 end
 
 # セルフェイス内挿
@@ -800,6 +866,8 @@ end
 - Euler/RK2/RK4スキームの切り替え
 - RK各ステージの中間ステップ管理を内部に隠蔽
 - Mainドライバは `advance!` のみを呼び出し、スキーム詳細を意識しない
+- Δtは初期化時に一度だけ計算し固定値として保持する（要件準拠）
+- 固定Δt運用でも毎ステップCFL/拡散条件を監視し、違反時は停止（dry_run時は警告）
 
 **Dependencies**
 - Inbound: Main Driver — ステップ進行呼び出し (P0)
@@ -835,16 +903,17 @@ function advance!(
 )::Tuple{Float64, Int, Float64}
     # Returns: (実際のdt, 圧力反復回数, 圧力残差)
     # スキームに応じて内部でEuler/RK2/RK4を選択
+    # dt_fixed > 0 の場合は固定値を優先し、0の場合のみcompute_dtで算出
 end
 
-# 時間刻み計算
+# 時間刻み計算（初期化時のみ）
 function compute_dt(
     buffers::CFDBuffers,
     grid::GridData,
     Co::Float64,
     nu::Float64
 )::Float64
-    # CFL条件と拡散条件から安定な時間刻みを計算
+    # CFL条件と拡散条件から固定Δtを計算
 end
 
 # Euler法（1ステージ）
@@ -859,7 +928,7 @@ function euler_step!(
 )::Tuple{Int, Float64}
 end
 
-# RK2法（2ステージ）
+# RK2法（2ステージ、Heun法/改良Euler法）
 function rk2_step!(
     buffers::CFDBuffers,
     grid::GridData,
@@ -869,13 +938,24 @@ function rk2_step!(
     Cs::Float64,
     par::String
 )::Tuple{Int, Float64}
-    # 使用バッファ: buffers.u_rk1, v_rk1, w_rk1（k1保存用）
+    # Heun法（α=1）を採用:
+    #   k1 = F(u^n)
+    #   k2 = F(u^n + dt * k1)
+    #   u^{n+1} = u^n + (dt/2) * (k1 + k2)
     #
-    # Stage 1: k1 = F(u^n)
-    #          u_rk1 = u^n（現在値を保存）
-    #          u* = u^n + dt * k1
-    # Stage 2: k2 = F(u*)
-    #          u^{n+1} = 0.5 * (u_rk1 + u* + dt * k2)
+    # 使用バッファ: buffers.u_rk1, v_rk1, w_rk1（初期値保存用）
+    #
+    # 実装手順:
+    #   Stage 1: u_rk1 = u^n（現在値を保存）
+    #            u* = u^n + dt * F(u^n)
+    #   Stage 2: u^{n+1} = 0.5 * (u_rk1 + u* + dt * F(u*))
+    #          = u^n + (dt/2) * (k1 + k2)
+    #
+    # Butcher tableau:
+    #   0   |
+    #   1   | 1
+    #   ----|-----
+    #       | 1/2  1/2
 end
 
 # RK4法（4ステージ）
@@ -915,13 +995,16 @@ end
 | Field | Detail |
 |-------|--------|
 | Intent | 境界条件の定義と適用 |
-| Requirements | 8.1, 8.2, 8.3, 8.4, 8.5, 8.6 |
+| Requirements | 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8 |
 
 **Responsibilities & Constraints**
-- 外部境界（標準）: wall / symmetric / periodic / outflow / SlidingWall / Inlet
-- 内部境界: 吹出口・吸込口、矩形/円筒領域
-- 優先順位: 内部境界 > 物体 > 外部境界
-- `wall`, `symmetric`, `SlidingWall`, `Inlet`, `outflow` 時のゴーストセルマスク設定 (mask=0)
+- 外部境界（標準）: Wall / Symmetric / Periodic / Outflow / SlidingWall / Inflow / Opening
+- Opening境界: サブ属性`flow_type`で`inlet`（Dirichlet速度）または`outlet`（対流流出）を指定
+- 内部境界（internal_boundaries）: 物体として扱い、指定速度は移動壁として適用
+- 優先順位: Opening > internal_boundaries（物体扱い） > 外部境界
+- `Wall`, `Symmetric`, `SlidingWall` 時のゴーストセルマスク = 0、`Inflow`, `Outflow`, `Periodic`, `Opening` 時のマスク = 1
+- 圧力境界: Periodicは周期条件、それ以外は全てNeumann条件（$\partial p / \partial n = 0$）
+- Inflow / Opening / SlidingWall の速度は一様固定（時間依存・分布プロファイルは非対応）
 
 **Dependencies**
 - Inbound: FractionalStep — BC適用呼び出し (P0)
@@ -934,28 +1017,65 @@ end
 
 ```julia
 @enum VelocityBCType begin
-    Inlet
-    Dirichlet
-    Neumann
-    Outflow
-    Periodic
-    Symmetric
-    Wall
-    SlidingWall
+    Wall          # 粘着条件（速度ゼロ）、マスク=0
+    Symmetric     # 対称条件（法線速度ゼロ、接線勾配ゼロ）、マスク=0
+    SlidingWall   # 滑り壁（接線速度指定、法線ゼロ）、マスク=0
+                  # velocity_valueの解釈:
+                  #   - 境界面の法線方向成分は無視される（強制的にゼロ）
+                  #   - 接線方向成分がそのまま壁面速度として適用
+                  #   - 例: z_min境界でvelocity_value=(1.0, 0.0, 0.5)の場合
+                  #         → 壁面速度は(u=1.0, v=0.0)、w成分は無視
+    Inflow        # 流入（Dirichlet速度指定）、マスク=1
+    Outflow       # 対流流出条件、マスク=1
+    Periodic      # 周期境界条件、マスク=1
+    Opening       # 開口部（flow_typeでinlet/outletを指定）、マスク=1
+end
+
+# SlidingWall境界条件の詳細:
+#   境界面に応じた速度成分の解釈:
+#   | 境界面      | 法線方向（無視） | 接線方向（適用）              |
+#   |-------------|------------------|-------------------------------|
+#   | x_min/x_max | velocity_value[1] | velocity_value[2], velocity_value[3] |
+#   | y_min/y_max | velocity_value[2] | velocity_value[1], velocity_value[3] |
+#   | z_min/z_max | velocity_value[3] | velocity_value[1], velocity_value[2] |
+
+@enum OpeningFlowType begin
+    OpeningInlet   # Inflow相当（Dirichlet速度）
+    OpeningOutlet  # Outflow相当（対流流出）
 end
 
 struct ExternalBC
     velocity_type::VelocityBCType
-    velocity_value::NTuple{3, Float64}  # Inlet/SlidingWall時の値
+    velocity_value::NTuple{3, Float64}  # Inflow/SlidingWall時の値
 end
 
-struct InletOutlet
-    type::Symbol          # :rectangular or :cylindrical
-    position::NTuple{3, Float64}
-    size::NTuple{2, Float64}
-    normal::NTuple{3, Int}
-    condition::VelocityBCType
-    velocity::NTuple{3, Float64}
+struct Opening
+    name::String              # 識別名（オプション）
+    type::Symbol              # :rectangular or :cylindrical
+    boundary::Symbol          # :x_min, :x_max, :y_min, :y_max, :z_min, :z_max
+    # rectangular用
+    position::NTuple{3, Float64}   # 中心座標
+    size::NTuple{2, Float64}       # 境界面平行方向サイズ
+    # cylindrical用
+    center::NTuple{3, Float64}     # 中心座標
+    radius::Float64                # 半径
+    # 共通
+    flow_type::OpeningFlowType     # inlet or outlet
+    velocity::NTuple{3, Float64}   # 速度ベクトル（inlet時必須、outlet時オプション）
+end
+
+struct InternalBoundary
+    type::Symbol              # :rectangular or :cylindrical
+    # rectangular用
+    region_min::NTuple{3, Float64}
+    region_max::NTuple{3, Float64}
+    # cylindrical用
+    center::NTuple{3, Float64}
+    radius::Float64
+    height::Float64
+    axis::Symbol              # :x, :y, :z
+    # 共通
+    velocity::NTuple{3, Float64}   # 物体内部速度（SlidingWall相当）
 end
 
 struct BoundaryConditionSet
@@ -965,8 +1085,7 @@ struct BoundaryConditionSet
     y_max::ExternalBC
     z_min::ExternalBC
     z_max::ExternalBC
-    inlets::Vector{InletOutlet}
-    outlets::Vector{InletOutlet}
+    openings::Vector{Opening}              # 統合されたinlet/outlet
     internal_boundaries::Vector{InternalBoundary}
 end
 
@@ -1021,10 +1140,17 @@ end
 - ゴーストセル値を内部セル値からコピー
 - 速度（u, v, w）と圧力（p）の全てに適用
 - 2Dシミュレーションでは例えばy方向を周期的にすることでXZ平面計算が可能
+- **圧力境界**: Periodic境界では周期条件を適用し、圧力場の連続性を保証
+
+**Opening境界の処理方針**
+- `flow_type: inlet`: Inflow相当。指定速度をDirichlet条件で適用。マスク=1
+- `flow_type: outlet`: Outflow相当。対流流出条件を適用。velocity指定時はDirichlet
+- 外部境界面上の部分領域に適用（boundary属性で配置面を指定）
+- 優先順位が外部境界より高いため、Wallの中に穴を開けるイメージ
 
 **内部境界条件の処理方針**
-- 内部境界は壁面と同様にマスク関数で処理
-- 速度: `mask`配列に内部境界セルを含め、対流/拡散フラックス計算時に自動適用
+- 内部境界（`internal_boundaries`）は物体として扱い、対象領域のマスク値を `0` に設定
+- 速度: 指定された速度ベクトルを物体内部速度として適用（移動壁/SlidingWall相当）
 - 圧力: 物体セルと同様にNeumann条件（∂p/∂n=0）がマスク関数で適用される
 
 ---
@@ -1058,6 +1184,14 @@ struct GeometryObject
     velocity::NTuple{3, Float64}
 end
 
+# 円筒（cylinder）のcenter座標の解釈:
+#   centerは常に「軸方向の最小座標側の端面中心」を指す
+#   | axis | centerの意味                    | 円筒の範囲                        |
+#   |------|--------------------------------|----------------------------------|
+#   | :x   | x=center[1]側の端面中心         | x: center[1] → center[1]+height |
+#   | :y   | y=center[2]側の端面中心         | y: center[2] → center[2]+height |
+#   | :z   | z=center[3]側の端面中心（底面） | z: center[3] → center[3]+height |
+
 function load_geometry(filepath::String)::Vector{GeometryObject}
     # JSON読込、形状リスト返却
 end
@@ -1088,6 +1222,7 @@ end
 - 境界条件JSON解析
 - 必須パラメータ検証
 - 安定条件チェック
+- JSON内のキーワードは小文字へ正規化して照合（大小文字混在を許容）
 
 **Dependencies**
 - Inbound: Main Driver — 初期化時呼び出し (P0)
@@ -1121,35 +1256,14 @@ struct InitialCondition
     pressure::Float64             # 初期圧力 [Pa]（デフォルト: 0.0）
 end
 
-# 内部境界（部分境界）定義
-struct InternalBoundary
-    type::Symbol                  # :rectangular or :cylindrical
-    # 矩形の場合
-    region_min::NTuple{3, Float64}  # 領域最小座標
-    region_max::NTuple{3, Float64}  # 領域最大座標
-    # 円筒の場合
-    center::NTuple{3, Float64}    # 中心座標
-    radius::Float64               # 半径
-    height::Float64               # 高さ
-    axis::Symbol                  # 軸方向 :x, :y, :z
-    # 共通
-    normal::NTuple{3, Int}        # 法線方向ベクトル（例: (1,0,0), (0,0,-1)など軸に平行なベクトル）
-    velocity::NTuple{3, Float64}  # 速度ベクトル [m/s]
-end
-
-# normalとfaceの対応:
-#   normal = ( 1, 0, 0) → face = :x_max方向に流出
-#   normal = (-1, 0, 0) → face = :x_min方向に流出
-#   normal = ( 0, 1, 0) → face = :y_max方向に流出
-#   normal = ( 0,-1, 0) → face = :y_min方向に流出
-#   normal = ( 0, 0, 1) → face = :z_max方向に流出
-#   normal = ( 0, 0,-1) → face = :z_min方向に流出
-# 内部境界は軸に直交する面のみサポート（任意角度の法線は非対応）
+# 内部境界（物体扱い）定義
+# BoundaryConditions.InternalBoundary と同一構造を用い、型を共有する
+const InternalBoundary = BoundaryConditions.InternalBoundary
 
 # 内部境界条件の適用:
-#   速度: 指定されたvelocityをDirichlet条件として適用
-#   圧力: Neumann条件（∂p/∂n = 0）を適用
-#         → ポアソン方程式の離散化において、内部境界セルの圧力勾配をゼロとする
+#   internal_boundariesは物体として扱い、対象領域のマスク値を0に設定
+#   速度: 指定されたvelocityを物体内部速度として適用
+#   圧力: 物体セルと同様にNeumann条件がマスク関数で適用される
 
 struct SimulationParams
     dry_run::Bool
@@ -1166,15 +1280,18 @@ struct SimulationParams
     div_max_threshold::Float64
     initial_condition::InitialCondition
     restart_file::String
+    geometry_file::String  # Geometry JSONファイルパス（オプション、空文字列で物体なし）
 end
 
 function load_parameters(filepath::String)::SimulationParams
     # JSON解析、検証、安定条件チェック
+    # キーワードは小文字へ正規化して照合
     # Errors: 構文エラー、必須パラメータ欠落、安定条件違反
 end
 
 function load_boundary_conditions(filepath::String)::BoundaryConditionSet
     # 境界条件JSON解析
+    # キーワードは小文字へ正規化して照合
 end
 ```
 
@@ -1193,6 +1310,8 @@ end
 - 有次元量として出力
 - **原点座標は最初のセルの左端（フェイス位置）を格納**
   - セルセンター座標: `x_center[i] = origin + (i - 0.5) * pitch`
+- ヘッダ項目: svType, dType, サイズ(IMAX,JMAX,KMAX), 原点(XORG,YORG,ZORG), ピッチ(DX,DY,DZ), 時刻(step,time)
+- Zが非等間隔の場合: Lz = z_{Nz+3} - z_{3}, DZ = Lz / Nz を格納
 
 **ファイル命名規則**
 | ファイル種別 | 命名規則 | 例 |
@@ -1255,6 +1374,9 @@ end
 **Responsibilities & Constraints**
 - 倍精度バイナリ、ヘッダ付き
 - 無次元のみ（次元フラグは0固定）
+- is_dimensionalは0固定、0以外はフォーマット不正としてエラー
+- Reference_Length/Reference_Velocityをヘッダに保持し、リスタート時にJSON設定と一致確認（不一致は警告）
+- リトルエンディアン固定
 
 **ファイル命名規則**
 | ファイル種別 | 命名規則 | 例 |
@@ -1312,6 +1434,8 @@ end
 - コンソールへのステップ情報表示（タイムステップ、時刻、Umax、CFL、発散、圧力残差）
 - historyファイル（スペース区切りテキスト形式）への記録
 - 発散検出とエラー通知
+- history.txt は固定幅カラムで step, time, Umax, divMax, dU, ItrP, ResP を出力
+- condition.txt は格子・物理・時間積分・境界条件・出力間隔などの計算条件を出力
 
 **ファイル命名規則**
 | ファイル種別 | 命名規則 |
@@ -1333,13 +1457,15 @@ struct MonitorData
     time::Float64
     u_max::Float64            # 速度の最大値（Umax）
     div_max::Float64          # 発散値の最大値（divMax）
+    div_max_pos::NTuple{3, Int}  # divMaxの位置(i,j,k)
     dU::Float64               # 速度変動量（定常状態判定用）
     pressure_itr::Int         # 圧力反復回数（ItrP）
     pressure_residual::Float64 # 圧力反復残差（ResP）
 end
 
 # history出力フォーマット（スペース区切り、固定幅カラム）:
-# step time Umax divMax dU ItrP ResP
+# step time Umax divMax (i,j,k) dU ItrP ResP
+# console出力も同様にdivMaxと(i,j,k)を表示する
 # 
 # dU = sqrt(Σ((u^n+1 - u^n)² + (v^n+1 - v^n)² + (w^n+1 - w^n)²))
 # 全内部セルの速度変動のL2ノルム（定常状態→0に収束）
@@ -1368,7 +1494,8 @@ function log_step!(
     history_io::IO
 )
     # コンソール表示とhistory記録
-    # 発散検出時は警告/エラー
+    # 発散検出時は停止フラグを返し、Main Driverが停止処理を行う
+    # 停止時のチェックポイント保存はMain Driver側で実施する
 end
 
 function check_divergence(div_max::Float64, threshold::Float64)::Bool
@@ -1379,14 +1506,14 @@ function compute_divergence_max(
     buffers::CFDBuffers,
     grid::GridData
 )::Float64
-    # 実CFL数を計算
+    # 最大発散を計算
 end
 
-function compute_divergence_max(
+function compute_cfl_max(
     buffers::CFDBuffers,
     grid::GridData
 )::Float64
-    # 最大発散を計算
+    # 実CFL数を計算
 end
 
 function compute_u_max(
@@ -1485,7 +1612,7 @@ erDiagram
     GridData ||--|| CFDBuffers : sizes
 
     BoundaryConditionSet ||--|{ ExternalBC : has
-    BoundaryConditionSet ||--|{ InletOutlet : has
+    BoundaryConditionSet ||--|{ Opening : has
     BoundaryConditionSet ||--|{ InternalBoundary : has
 
     GeometryObject }|--|| CFDBuffers : fills_mask
@@ -1501,6 +1628,8 @@ erDiagram
 - 代表速度 U₀ > 0（ゼロ除算防止）
 - マスク値は0.0または1.0のみ
 
+※ ER図の `ExternalBC` / `Opening` / `InternalBoundary` は本文の構造体名と一致する
+
 ---
 
 ## Error Handling
@@ -1510,6 +1639,7 @@ erDiagram
 - **Fail Fast**: 入力検証でエラー即停止
 - **Graceful Degradation**: 収束失敗時は警告継続
 - **Observability**: 全エラーをログ出力
+- 発散検出（divMax超過）の停止判定はMonitorが行い、停止フラグをMain Driverへ通知する
 
 ### Error Categories and Responses
 
@@ -1518,7 +1648,7 @@ erDiagram
 | Input Error | JSON構文エラー、必須パラメータ欠落 | エラー出力、即時停止 |
 | Stability Violation | 拡散数 D ≥ 0.5 | 警告出力、停止（dry_run時は警告のみ） |
 | Memory Error | 必要メモリ > 利用可能メモリ | 警告出力（dry_runのみ） |
-| Divergence | divMax > threshold, NaN/Inf | エラー出力、停止 |
+| Divergence | divMax > threshold または NaN/Inf 検出 | エラー出力、停止 |
 | IO Error | ファイル読込/書込失敗 | エラー出力、停止 |
 | Convergence Failure | ポアソン最大反復到達 | `on_divergence`設定に従う（下記参照） |
 
@@ -1564,7 +1694,7 @@ erDiagram
 
 **Target Metrics**:
 - 100³格子で1ステップ < 1秒（8スレッド）
-- メモリ: 主要配列(15個) × 8バイト × (Nx+4)(Ny+4)(Nz+4)
+- メモリ: CFDBuffers(20配列) × 8バイト × (Nx+4)(Ny+4)(Nz+4) + オプション配列（Krylov: 0-6、RK: 0-12）
 
 **Optimization**:
 - FLoops.jlスレッド並列

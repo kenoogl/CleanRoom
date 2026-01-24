@@ -310,7 +310,7 @@ $$
 3. Where BiCGSTAB法が選択された場合, the Solver shall BiCGSTAB法を適用する（オプション）
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
 5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
-6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 5 sweep）を適用する
+6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 4 sweep）を適用する
 7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算する（圧力境界条件の定数不定性によるドリフト防止）
 8. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
 9. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
