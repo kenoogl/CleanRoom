@@ -9,7 +9,7 @@ export Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow
 export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
 export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!
 export apply_face_velocity_bcs!, apply_boundary_mask!, apply_internal_boundary_mask!, apply_pressure_bcs!
-export apply_outflow_region!, update_pressure_solve_mask!
+export apply_outflow_region!, update_boundary_mask!
 
 @enum VelocityBCType begin
     Wall          # 粘着条件（速度ゼロ）、マスク=0
@@ -1234,13 +1234,13 @@ function apply_internal_boundary_mask!(
 end
 
 """
-    update_pressure_solve_mask!(mask, grid, bc_set, val)
+    update_boundary_mask!(mask, grid, bc_set, val)
 
 圧力計算時にInflow/Outflow/Opening境界のゴーストセルマスクを指定値に変更する。
 - 圧力計算時: val = 0.0
 - 対流計算時: val = 1.0
 """
-function update_pressure_solve_mask!(
+function update_boundary_mask!(
     mask::Array{Float64, 3},
     grid::GridData,
     bc_set::BoundaryConditionSet,

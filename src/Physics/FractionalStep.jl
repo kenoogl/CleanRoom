@@ -263,13 +263,13 @@ function fractional_step!(
     
     # 5. Poisson Solve
     # Temporarily set Outflow mask to 0.0 to enforce Neumann pressure BC (dp/dn=0)
-    update_pressure_solve_mask!(buffers.mask, grid, bc_set, 0.0)
+    update_boundary_mask!(buffers.mask, grid, bc_set, 0.0)
     
     alpha = poisson_config.mach2 / (dt * dt)
     converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par, alpha)
     
     # Restore Outflow mask to 1.0 for Convection/Velocity update
-    update_pressure_solve_mask!(buffers.mask, grid, bc_set, 1.0)
+    update_boundary_mask!(buffers.mask, grid, bc_set, 1.0)
     
     # 6. Correct Velocity (Face and Center)
     correct_velocity!(buffers, grid, dt, par)

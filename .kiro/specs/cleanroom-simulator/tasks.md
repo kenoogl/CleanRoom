@@ -51,10 +51,10 @@ internal_boundariesを物体（mask=0）として扱い、速度は物体内部�
 
 圧力反復中にInflow/Outflow/Openingのマスクを一時的に0に変更
 
-- [ ] 4.1: マスク更新関数名を update_boundary_mask! に統一
-- [ ] 4.2: Inflow/Opening境界も動的マスク対象に追加
-- [ ] 4.3: FractionalStepで圧力計算前後にupdate_boundary_mask!を呼び出し
-- [ ] 4.4: 静的マスク方針を明記（Wall/Symmetric/SlidingWall=0、Periodic=1、Inflow/Outflow/Opening=1）
+- [x] 4.1: マスク更新関数名を update_boundary_mask! に統一
+- [x] 4.2: Inflow/Opening境界も動的マスク対象に追加
+- [x] 4.3: FractionalStepで圧力計算前後にupdate_boundary_mask!を呼び出し
+- [x] 4.4: 静的マスク方針を明記（Wall/Symmetric/SlidingWall=0、Periodic=1、Inflow/Outflow/Opening=1）
 
 ---
 

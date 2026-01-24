@@ -119,12 +119,12 @@ function run_simulation(param_file::String)
         fill_mask!(buffers.mask, objects, grid, "thread")
         apply_boundary_mask!(buffers.mask, grid, bc_set)
         apply_internal_boundary_mask!(buffers.mask, grid, bc_set)
-        update_pressure_solve_mask!(buffers.mask, grid, bc_set, 1.0)
+        update_boundary_mask!(buffers.mask, grid, bc_set, 1.0)
     else
         println("No geometry file found. Domain is empty.")
         apply_boundary_mask!(buffers.mask, grid, bc_set)
         apply_internal_boundary_mask!(buffers.mask, grid, bc_set)
-        update_pressure_solve_mask!(buffers.mask, grid, bc_set, 1.0)
+        update_boundary_mask!(buffers.mask, grid, bc_set, 1.0)
     end
     
     fill!(buffers.u, sim_params.initial_condition.velocity[1] / dim_params.U0) 
