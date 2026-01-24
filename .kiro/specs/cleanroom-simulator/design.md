@@ -186,10 +186,10 @@ flowchart TB
     E --> E2[Apply BCs to Pseudo Velocity]
     E2 --> F[Interpolate to Cell Faces]
     F --> G[Compute Divergence]
-    G --> H_mask[set_pressure_solve_mask: true]
+    G --> H_mask[update_boundary_mask!: true]
     H_mask --> H[Solve Poisson Equation]
     H --> I{Converged?}
-    I -->|Yes| J_unmask[set_pressure_solve_mask: false]
+    I -->|Yes| J_unmask[update_boundary_mask!: false]
     J_unmask --> J[Correct Velocity]
     I -->|No| K[Iteration Limit?]
     K -->|No| H
@@ -812,14 +812,14 @@ function fractional_step!(
     # 1. compute_pseudo_velocity!
     # 2. interpolate_to_faces!
     # 3. compute_divergence!
-    # 4. set_pressure_solve_mask!(mask, grid, bc_set, true)   # 圧力計算用にマスク変更
+    # 4. update_boundary_mask!(mask, grid, bc_set, true)   # 圧力計算用にマスク変更
     # 5. solve_poisson!
-    # 6. set_pressure_solve_mask!(mask, grid, bc_set, false)  # マスクを復元
+    # 6. update_boundary_mask!(mask, grid, bc_set, false)  # マスクを復元
     # 7. correct_velocity!
 end
 
 # 圧力計算用にInflow/Outflow/Opening境界のマスク値を設定
-function set_pressure_solve_mask!(
+function update_boundary_mask!(
     mask::Array{Float64, 3},
     grid::GridData,
     bc_set::BoundaryConditionSet,
