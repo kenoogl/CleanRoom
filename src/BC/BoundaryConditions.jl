@@ -886,38 +886,28 @@ function apply_pressure_bcs!(
     mask::Array{Float64, 3},
     bc_set::BoundaryConditionSet
 )
+    # 仕様: Periodicは周期条件、それ以外は全てNeumann条件（∂p/∂n = 0）
+    
     # Y-direction
     if bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :y)
     else
-        # y_min
-        p_type_min = Neumann
-        set_boundary_value!(p, grid, mask, :y_min, 0.0, p_type_min)
-        # y_max
-        p_type_max = Neumann
-        set_boundary_value!(p, grid, mask, :y_max, 0.0, p_type_max)
+        set_boundary_value!(p, grid, mask, :y_min, 0.0, :neumann)
+        set_boundary_value!(p, grid, mask, :y_max, 0.0, :neumann)
     end
     # X-direction
     if bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :x)
     else
-        # x_min
-        p_type_min = Neumann
-        set_boundary_value!(p, grid, mask, :x_min, 0.0, p_type_min)
-        # x_max
-        p_type_max = Neumann
-        set_boundary_value!(p, grid, mask, :x_max, 0.0, p_type_max)
+        set_boundary_value!(p, grid, mask, :x_min, 0.0, :neumann)
+        set_boundary_value!(p, grid, mask, :x_max, 0.0, :neumann)
     end
     # Z-direction
     if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
         apply_periodic_pressure!(p, grid, :z)
     else
-        # z_min
-        p_type_min = Neumann
-        set_boundary_value!(p, grid, mask, :z_min, 0.0, p_type_min)
-        # z_max
-        p_type_max = Neumann
-        set_boundary_value!(p, grid, mask, :z_max, 0.0, p_type_max)
+        set_boundary_value!(p, grid, mask, :z_min, 0.0, :neumann)
+        set_boundary_value!(p, grid, mask, :z_max, 0.0, :neumann)
     end
 end
 
