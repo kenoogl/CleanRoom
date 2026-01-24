@@ -10,17 +10,17 @@
 
 InputReaderとBoundaryConditionsを新仕様スキーマに対応させる
 
-- [ ] 1.1: VelocityBCType列挙型を仕様準拠に更新（Wall/Symmetric/Periodic/Outflow/SlidingWall/Inflow/Opening）
-- [ ] 1.2: OpeningFlowType列挙型を追加（OpeningInlet/OpeningOutlet）
-- [ ] 1.3: Opening構造体を実装（name, type, boundary, position, size, center, radius, flow_type, velocity）
-- [ ] 1.4: InternalBoundary構造体を実装（物体扱い、速度は内部速度）
-- [ ] 1.5: BoundaryConditionSetを更新（openings配列でinlets/outletsを統合）
-- [ ] 1.6: InputReaderのJSON解析を新スキーマに対応（キーワード小文字正規化）
-- [ ] 1.7: 旧キーワード（dirichlet/neumann/inlet/outlet）を廃止、エラー出力
-- [ ] 1.8: Openingはopenings配列で扱い、ExternalBCでのOpening指定はエラーとする（優先順位: Opening > internal_boundaries > 外部境界）
-- [ ] 1.9: JSON全体のキーワード小文字正規化（start/dry_run/Time_Integration_Scheme/Poisson/on_divergence等、BC以外も対象）
-- [ ] 1.10: Inflow/Opening/SlidingWallの速度は一様固定（時間依存・分布プロファイル非対応）であることを明記・実装
-- [ ] 1.11: ExternalBCでOpeningを許可しない旨を設計書に明記（設計書反映）
+- [x] 1.1: VelocityBCType列挙型を仕様準拠に更新（Wall/Symmetric/Periodic/Outflow/SlidingWall/Inflow/Opening）
+- [x] 1.2: OpeningFlowType列挙型を追加（OpeningInlet/OpeningOutlet）
+- [x] 1.3: Opening構造体を実装（name, type, boundary, position, size, center, radius, flow_type, velocity）
+- [x] 1.4: InternalBoundary構造体を実装（物体扱い、速度は内部速度）
+- [x] 1.5: BoundaryConditionSetを更新（openings配列でinlets/outletsを統合）
+- [x] 1.6: InputReaderのJSON解析を新スキーマに対応（キーワード小文字正規化）
+- [x] 1.7: 旧キーワード（dirichlet/neumann/inlet/outlet）を廃止、エラー出力
+- [x] 1.8: Openingはopenings配列で扱い、ExternalBCでのOpening指定はエラーとする（優先順位: Opening > internal_boundaries > 外部境界）
+- [x] 1.9: JSON全体のキーワード小文字正規化（start/dry_run/Time_Integration_Scheme/Poisson/on_divergence等、BC以外も対象）
+- [x] 1.10: Inflow/Opening/SlidingWallの速度は一様固定（時間依存・分布プロファイル非対応）であることを明記・実装
+- [x] 1.11: ExternalBCでOpeningを許可しない旨を設計書に明記（設計書反映）
 
 ---
 

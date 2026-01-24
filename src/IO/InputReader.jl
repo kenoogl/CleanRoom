@@ -284,8 +284,16 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
 
     function parse_bc(bc_data)
         vel_str = lowercase(String(bc_data.velocity))
-        bc_type = if vel_str == "inflow" || vel_str == "inlet"
-                      Inflow
+        # 廃止キーワードのチェック
+        if vel_str in ["inlet", "outlet", "dirichlet", "neumann"]
+            error("Deprecated BC keyword '$(vel_str)'. Use 'inflow'/'outflow' instead. For openings, use 'openings' array.")
+        end
+        # ExternalBCでのOpening禁止
+        if vel_str == "opening"
+            error("'Opening' cannot be specified in external_boundaries. Use 'openings' array instead.")
+        end
+        
+        bc_type = if vel_str == "inflow"; Inflow
                   elseif vel_str == "outflow"; Outflow
                   elseif vel_str == "periodic"; Periodic
                   elseif vel_str == "symmetric"; Symmetric
@@ -296,7 +304,7 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
         val = (0.0, 0.0, 0.0)
         if bc_type == Inflow || bc_type == SlidingWall
             if !haskey(bc_data, :value)
-                error("$(bc_type) boundary requires value.")
+                error("$(bc_type) boundary requires 'value' field.")
             end
             val_dim = parse_tuple3(bc_data.value)
             val = val_dim ./ U0

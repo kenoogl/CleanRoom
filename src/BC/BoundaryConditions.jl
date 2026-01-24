@@ -12,14 +12,12 @@ export apply_face_velocity_bcs!, apply_boundary_mask!, apply_internal_boundary_m
 export apply_outflow_region!, update_pressure_solve_mask!
 
 @enum VelocityBCType begin
-    Inflow
-    Dirichlet
-    Neumann
-    Outflow
-    Periodic
-    Symmetric
-    Wall
-    SlidingWall
+    Wall          # 粘着条件（速度ゼロ）、マスク=0
+    Symmetric     # 対称条件（法線速度ゼロ、接線勾配ゼロ）、マスク=0
+    SlidingWall   # 滑り壁（接線速度指定、法線ゼロ）、マスク=0
+    Inflow        # 流入（Dirichlet速度指定）、マスク=1
+    Outflow       # 対流流出条件、マスク=1
+    Periodic      # 周期境界条件、マスク=1
 end
 
 @enum OpeningFlowType begin
@@ -496,6 +494,42 @@ function apply_symmetric_bc!(
     end
 end
 
+"""
+    apply_sliding_wall!(u, v, w, grid, mask, face, velocity)
+
+SlidingWall境界条件を適用する。
+- 法線方向速度成分: ゼロ固定
+- 接線方向速度成分: 指定値をDirichlet条件として適用
+"""
+function apply_sliding_wall!(
+    u::Array{Float64, 3},
+    v::Array{Float64, 3},
+    w::Array{Float64, 3},
+    grid::GridData,
+    mask::Array{Float64, 3},
+    face::Symbol,
+    velocity::NTuple{3, Float64}
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    
+    if face == :x_min || face == :x_max
+        # 法線方向: u → ゼロ、接線方向: v, w → 指定値
+        set_boundary_value!(u, grid, mask, face, 0.0, :dirichlet)
+        set_boundary_value!(v, grid, mask, face, velocity[2], :dirichlet)
+        set_boundary_value!(w, grid, mask, face, velocity[3], :dirichlet)
+    elseif face == :y_min || face == :y_max
+        # 法線方向: v → ゼロ、接線方向: u, w → 指定値
+        set_boundary_value!(u, grid, mask, face, velocity[1], :dirichlet)
+        set_boundary_value!(v, grid, mask, face, 0.0, :dirichlet)
+        set_boundary_value!(w, grid, mask, face, velocity[3], :dirichlet)
+    elseif face == :z_min || face == :z_max
+        # 法線方向: w → ゼロ、接線方向: u, v → 指定値
+        set_boundary_value!(u, grid, mask, face, velocity[1], :dirichlet)
+        set_boundary_value!(v, grid, mask, face, velocity[2], :dirichlet)
+        set_boundary_value!(w, grid, mask, face, 0.0, :dirichlet)
+    end
+end
+
 @inline function in_internal_cylinder(
     x::Float64,
     y::Float64,
@@ -538,10 +572,12 @@ end
 end
 
 """
-    set_boundary_value!(phi, grid, mask, face, val, type)
+    set_boundary_value!(phi, grid, mask, face, val, mode)
 
 Helper to set Dirichlet/Neumann on a face, considering the mask.
 For Dirichlet flow, the velocity is masked to 0 on solid regions.
+
+mode: :dirichlet (速度固定) or :neumann (勾配ゼロ)
 """
 function set_boundary_value!(
     phi::Array{Float64, 3},
@@ -549,11 +585,11 @@ function set_boundary_value!(
     mask::Array{Float64, 3},
     face::Symbol,
     val::Float64,
-    type::VelocityBCType
+    mode::Symbol
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     
-    if type == Dirichlet || type == Inflow
+    if mode == :dirichlet
         if face == :x_min
              # Use mask from first internal cell (i=3)
              @inbounds for k in 1:mz, j in 1:my
@@ -586,7 +622,7 @@ function set_boundary_value!(
                  phi[i, j, mz] = val * mask[i, j, mz-2]
              end
         end
-    elseif type == Neumann
+    elseif mode == :neumann
         if face == :x_min
              @inbounds @. phi[2, :, :] = phi[3, :, :]; phi[1, :, :] = phi[2, :, :]
         elseif face == :x_max
@@ -725,14 +761,10 @@ function apply_velocity_bcs!(
 )
     # 1. External Boundaries
     function apply_ext(bc, face)
-        if bc.velocity_type == Dirichlet || bc.velocity_type == Inflow
-             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], bc.velocity_type)
-             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], bc.velocity_type)
-             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], bc.velocity_type)
-        elseif bc.velocity_type == Neumann
-             set_boundary_value!(u, grid, mask, face, 0.0, Neumann)
-             set_boundary_value!(v, grid, mask, face, 0.0, Neumann)
-             set_boundary_value!(w, grid, mask, face, 0.0, Neumann)
+        if bc.velocity_type == Inflow
+             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], :dirichlet)
+             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], :dirichlet)
+             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], :dirichlet)
         elseif bc.velocity_type == Outflow
              Uc = compute_face_average_velocity(u, v, w, grid, face)
              apply_outflow!(u, grid, face, dt, Uc)
@@ -741,13 +773,12 @@ function apply_velocity_bcs!(
         elseif bc.velocity_type == Symmetric
              apply_symmetric_bc!(u, v, w, grid, face)
         elseif bc.velocity_type == Wall
-             set_boundary_value!(u, grid, mask, face, 0.0, Dirichlet)
-             set_boundary_value!(v, grid, mask, face, 0.0, Dirichlet)
-             set_boundary_value!(w, grid, mask, face, 0.0, Dirichlet)
+             set_boundary_value!(u, grid, mask, face, 0.0, :dirichlet)
+             set_boundary_value!(v, grid, mask, face, 0.0, :dirichlet)
+             set_boundary_value!(w, grid, mask, face, 0.0, :dirichlet)
         elseif bc.velocity_type == SlidingWall
-             set_boundary_value!(u, grid, mask, face, bc.velocity_value[1], Dirichlet)
-             set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], Dirichlet)
-             set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], Dirichlet)
+             # SlidingWall: 接線速度のみ適用、法線成分は強制的にゼロ
+             apply_sliding_wall!(u, v, w, grid, mask, face, bc.velocity_value)
         end
     end
 
