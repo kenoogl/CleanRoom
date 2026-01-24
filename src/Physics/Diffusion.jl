@@ -3,7 +3,7 @@ module Diffusion
 using ..Common
 using ..Grid
 using ..Fields
-using ..BoundaryConditions: BoundaryConditionSet, Wall, SlidingWall, Inflow
+using ..BoundaryConditions: BoundaryConditionSet, Wall, SlidingWall, Inflow, Outflow
 
 export add_diffusion_flux!
 

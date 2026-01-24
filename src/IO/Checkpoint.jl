@@ -18,7 +18,7 @@ function write_checkpoint(
     time::Float64,
     dim_params::DimensionParams
 )
-    Sys.islittleendian() || error("Checkpoint requires little-endian system.")
+    Base.ENDIAN_BOM == 0x04030201 || error("Checkpoint requires little-endian system.")
     open(filepath, "w") do io
         # Header
         # Spec: internal counts, Int32 header
@@ -48,7 +48,7 @@ function read_checkpoint(
     if !isfile(filepath)
         error("Checkpoint file not found: $filepath")
     end
-    Sys.islittleendian() || error("Checkpoint requires little-endian system.")
+    Base.ENDIAN_BOM == 0x04030201 || error("Checkpoint requires little-endian system.")
     
     step = 0
     time = 0.0

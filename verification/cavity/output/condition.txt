@@ -26,6 +26,16 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
   Max Steps:                     2000
   Total Simulation Time:         12.5 [s]
 
+--- Boundary Conditions ---
+  x_min:     Wall         
+  x_max:     Wall         
+  y_min:     Wall         
+  y_max:     Wall         
+  z_min:     Wall         
+  z_max:     SlidingWall  (1.00, 0.00, 0.00)
+  Openings:              0
+  Internal Boundaries:   0
+
 --- Poisson Solver ---
   Solver:                RedBlackSOR
   Convergence Criteria:       1.0e-03
