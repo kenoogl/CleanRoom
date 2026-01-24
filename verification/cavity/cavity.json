@@ -5,6 +5,7 @@
   "Reference_Length": 1.0,
   "Reference_Velocity": 1.0,
   "Kinematic_Viscosity": 0.01,
+  "Sound_Speed": 340.0,
   "Smagorinsky_Constant": 0.2,
   "Origin_of_Region": [
     0.0,

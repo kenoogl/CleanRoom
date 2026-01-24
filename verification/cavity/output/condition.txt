@@ -7,6 +7,7 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
   Kinematic Viscosity ν:   1.0000e-02 [m²/s] 
   Reynolds Number Re:             100        
   Reference Time T0:                1 [s]    
+  Mach Number M:             0.002941        
 
 --- Grid Parameters ---
   Grid Size (Nx,Ny,Nz):  (32, 32, 32)
@@ -23,6 +24,7 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
   Courant Number:                 0.2
   Fixed Time Step Δt*:        0.00625 (dimensionless)
   Fixed Time Step Δt:         0.00625 [s]
+  Diffusion Number:             0.064
   Max Steps:                     2000
   Total Simulation Time:         12.5 [s]
 
@@ -38,6 +40,7 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
 
 --- Poisson Solver ---
   Solver:                RedBlackSOR
+  SOR Omega:                      1.2
   Convergence Criteria:       1.0e-03
   Max Iterations:                1000
 

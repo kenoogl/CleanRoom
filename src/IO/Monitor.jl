@@ -6,6 +6,7 @@ using ..Fields
 using ..Grid
 using ..InputReader
 using ..BoundaryConditions
+using ..PressureSolver
 
 export MonitorData, MonitorConfig, init_monitor, log_step!, check_divergence
 export compute_u_max, compute_cfl, compute_divergence_max
@@ -70,6 +71,7 @@ function write_condition_file(
         @printf(io, "  %-22s %12.4e [m²/s] \n", "Kinematic Viscosity ν:", dim_params.nu)
         @printf(io, "  %-22s %12.4g        \n", "Reynolds Number Re:", dim_params.Re)
         @printf(io, "  %-22s %12.4g [s]    \n", "Reference Time T0:", dim_params.T0)
+        @printf(io, "  %-22s %12.4g        \n", "Mach Number M:", sqrt(sim_params.poisson.mach2))
         println(io, "")
         println(io, "--- Grid Parameters ---")
         @printf(io, "  %-22s (%d, %d, %d)\n", "Grid Size (Nx,Ny,Nz):", grid.mx-4, grid.my-4, grid.mz-4)
@@ -89,6 +91,16 @@ function write_condition_file(
         @printf(io, "  %-22s %12.4g\n", "Courant Number:", sim_params.courant_number)
         @printf(io, "  %-22s %12.6g (dimensionless)\n", "Fixed Time Step Δt*:", dt_fixed)
         @printf(io, "  %-22s %12.6g [s]\n", "Fixed Time Step Δt:", dt_fixed * dim_params.T0)
+        
+        # Diffusion number: (1/Re) * dt / dx^2
+        inv_re = 1.0 / dim_params.Re
+        diff_x = inv_re * dt_fixed / (grid.dx^2)
+        diff_y = inv_re * dt_fixed / (grid.dy^2)
+        dz_min = minimum(grid.dz[3:end-2])
+        diff_z = inv_re * dt_fixed / (dz_min^2)
+        diff_max = max(diff_x, diff_y, diff_z)
+        @printf(io, "  %-22s %12.4g\n", "Diffusion Number:", diff_max)
+        
         @printf(io, "  %-22s %12d\n", "Max Steps:", sim_params.max_step)
         total_time_nd = dt_fixed * sim_params.max_step
         total_time_dim = total_time_nd * dim_params.T0
@@ -117,6 +129,9 @@ function write_condition_file(
 
         println(io, "--- Poisson Solver ---")
         @printf(io, "  %-22s %s\n", "Solver:", sim_params.poisson.solver)
+        if sim_params.poisson.solver == RedBlackSOR
+            @printf(io, "  %-22s %12.4g\n", "SOR Omega:", sim_params.poisson.omega)
+        end
         @printf(io, "  %-22s %12.1e\n", "Convergence Criteria:", sim_params.poisson.tol)
         @printf(io, "  %-22s %12d\n", "Max Iterations:", sim_params.poisson.max_iter)
         println(io, "")
