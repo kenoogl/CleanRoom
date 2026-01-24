@@ -1,30 +1,29 @@
 {
   "external_boundaries": {
     "x_min": {
-      "velocity": "inlet",
       "value": [
         5.0,
         0.0,
         0.0
-      ]
+      ],
+      "type": "inflow"
     },
     "x_max": {
-      "velocity": "outflow"
+      "type": "outflow"
     },
     "y_min": {
-      "velocity": "periodic"
+      "type": "periodic"
     },
     "y_max": {
-      "velocity": "periodic"
+      "type": "periodic"
     },
     "z_min": {
-      "velocity": "wall"
+      "type": "wall"
     },
     "z_max": {
-      "velocity": "wall"
+      "type": "wall"
     }
   },
-  "inlets": [],
-  "outlets": [],
-  "internal_boundaries": []
+  "internal_boundaries": [],
+  "openings": []
 }

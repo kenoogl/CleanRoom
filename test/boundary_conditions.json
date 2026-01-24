@@ -1,21 +1,60 @@
 {
   "external_boundaries": {
-    "x_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "x_max": { "velocity": "outflow" },
-    "y_min": { "velocity": "neumann" },
-    "y_max": { "velocity": "neumann" },
-    "z_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "z_max": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] }
-  },
-  "inlets": [
-    {
-      "type": "rectangular",
-      "position": [0.1, 0.5, 0.5],
-      "size": [0.2, 0.2],
-      "normal": [1, 0, 0],
-      "velocity": [1.0, 0.0, 0.0]
+    "x_min": {
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "inflow"
+    },
+    "x_max": {
+      "type": "outflow"
+    },
+    "y_min": {
+      "type": "symmetric"
+    },
+    "y_max": {
+      "type": "symmetric"
+    },
+    "z_min": {
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "inflow"
+    },
+    "z_max": {
+      "value": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "inflow"
     }
-  ],
-  "outlets": [],
-  "internal_boundaries": []
+  },
+  "internal_boundaries": [],
+  "openings": [
+    {
+      "name": "",
+      "type": "rectangular",
+      "boundary": "x_min",
+      "flow_type": "inlet",
+      "velocity": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "position": [
+        0.1,
+        0.5,
+        0.5
+      ],
+      "size": [
+        0.2,
+        0.2
+      ]
+    }
+  ]
 }

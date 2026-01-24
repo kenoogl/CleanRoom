@@ -843,12 +843,12 @@ dry_run有効時に以下を実行する：
 ```json
 {
   "external_boundaries": {
-    "x_min": { "velocity": "Inflow", "value": [0.3, 0.0, 0.0] },
-    "x_max": { "velocity": "Outflow" },
-    "y_min": { "velocity": "Periodic" },
-    "y_max": { "velocity": "Periodic" },
-    "z_min": { "velocity": "Wall" },
-    "z_max": { "velocity": "Wall" }
+    "x_min": { "type": "Inflow", "value": [0.3, 0.0, 0.0] },
+    "x_max": { "type": "Outflow" },
+    "y_min": { "type": "Periodic" },
+    "y_max": { "type": "Periodic" },
+    "z_min": { "type": "Wall" },
+    "z_max": { "type": "Wall" }
   },
   "openings": [
     {
@@ -900,7 +900,9 @@ dry_run有効時に以下を実行する：
 }
 ```
 
+※ 外部境界は `{ "type": "<bc_type>", "value": [...] }` 形式のみを許可し、文字列のみの省略形は許可しない。
 ※ JSON内のキーワード（例: `Wall`, `Periodic`, `Inflow` など）は大文字小文字が混在するため、**パース時に小文字へ正規化して照合する**。
+※ 現時点で扱うのは速度境界のみ。将来的に圧力・温度などのサブ属性を追加できる設計とする。
 
 
 ### Requirement 12: 可視化機能

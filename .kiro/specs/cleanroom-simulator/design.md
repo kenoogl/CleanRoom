@@ -1223,6 +1223,8 @@ end
 - 必須パラメータ検証
 - 安定条件チェック
 - JSON内のキーワードは小文字へ正規化して照合（大小文字混在を許容）
+- 外部境界は `{ type, value }` 形式のみを許可（文字列のみの省略形は不可）
+- 現時点は速度境界のみを扱う（将来の拡張でpressure/temperatureを追加可能）
 
 **Dependencies**
 - Inbound: Main Driver — 初期化時呼び出し (P0)

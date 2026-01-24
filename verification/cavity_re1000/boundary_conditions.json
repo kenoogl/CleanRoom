@@ -1,30 +1,29 @@
 {
   "external_boundaries": {
     "x_min": {
-      "velocity": "wall"
+      "type": "wall"
     },
     "x_max": {
-      "velocity": "wall"
+      "type": "wall"
     },
     "y_min": {
-      "velocity": "wall"
+      "type": "wall"
     },
     "y_max": {
-      "velocity": "wall"
+      "type": "wall"
     },
     "z_min": {
-      "velocity": "wall"
+      "type": "wall"
     },
     "z_max": {
-      "velocity": "SlidingWall",
       "value": [
         1.0,
         0.0,
         0.0
-      ]
+      ],
+      "type": "slidingwall"
     }
   },
-  "inlets": [],
-  "outlets": [],
-  "internal_boundaries": []
+  "internal_boundaries": [],
+  "openings": []
 }

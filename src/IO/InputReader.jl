@@ -283,23 +283,33 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
     data = JSON3.read(json_str)
 
     function parse_bc(bc_data)
-        vel_str = lowercase(String(bc_data.velocity))
+        if bc_data isa AbstractString
+            error("external_boundaries must be an object with {type, value}; string shorthand is not allowed.")
+        end
+        if !haskey(bc_data, :type)
+            if haskey(bc_data, :velocity)
+                error("external_boundaries must use \"type\" (\"velocity\" is deprecated).")
+            end
+            error("external_boundaries must specify \"type\".")
+        end
+
+        type_str = lowercase(String(bc_data.type))
         # 廃止キーワードのチェック
-        if vel_str in ["inlet", "outlet", "dirichlet", "neumann"]
-            error("Deprecated BC keyword '$(vel_str)'. Use 'inflow'/'outflow' instead. For openings, use 'openings' array.")
+        if type_str in ["inlet", "outlet", "dirichlet", "neumann"]
+            error("Deprecated BC keyword '$(type_str)'. Use 'inflow'/'outflow' instead. For openings, use 'openings' array.")
         end
         # ExternalBCでのOpening禁止
-        if vel_str == "opening"
+        if type_str == "opening"
             error("'Opening' cannot be specified in external_boundaries. Use 'openings' array instead.")
         end
         
-        bc_type = if vel_str == "inflow"; Inflow
-                  elseif vel_str == "outflow"; Outflow
-                  elseif vel_str == "periodic"; Periodic
-                  elseif vel_str == "symmetric"; Symmetric
-                  elseif vel_str == "wall"; Wall
-                  elseif vel_str == "slidingwall" || vel_str == "sliding_wall"; SlidingWall
-                  else; error("Unknown velocity BC type: $(vel_str)")
+        bc_type = if type_str == "inflow"; Inflow
+                  elseif type_str == "outflow"; Outflow
+                  elseif type_str == "periodic"; Periodic
+                  elseif type_str == "symmetric"; Symmetric
+                  elseif type_str == "wall"; Wall
+                  elseif type_str == "slidingwall" || type_str == "sliding_wall"; SlidingWall
+                  else; error("Unknown velocity BC type: $(type_str)")
                   end
         val = (0.0, 0.0, 0.0)
         if bc_type == Inflow || bc_type == SlidingWall
