@@ -1,27 +1,39 @@
 {
   "external_boundaries": {
     "x_min": {
-      "type": "wall"
+      "velocity": {
+        "type": "wall"
+      }
     },
     "x_max": {
-      "type": "wall"
+      "velocity": {
+        "type": "wall"
+      }
     },
     "y_min": {
-      "type": "symmetric"
+      "velocity": {
+        "type": "symmetric"
+      }
     },
     "y_max": {
-      "type": "symmetric"
+      "velocity": {
+        "type": "symmetric"
+      }
     },
     "z_min": {
-      "type": "wall"
+      "velocity": {
+        "type": "wall"
+      }
     },
     "z_max": {
-      "value": [
-        1.0,
-        0.0,
-        0.0
-      ],
-      "type": "slidingwall"
+      "velocity": {
+        "type": "slidingwall",
+        "value": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
     }
   },
   "internal_boundaries": [],

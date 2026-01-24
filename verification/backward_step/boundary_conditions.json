@@ -1,27 +1,39 @@
 {
   "external_boundaries": {
     "x_min": {
-      "value": [
-        5.0,
-        0.0,
-        0.0
-      ],
-      "type": "inflow"
+      "velocity": {
+        "type": "inflow",
+        "value": [
+          5.0,
+          0.0,
+          0.0
+        ]
+      }
     },
     "x_max": {
-      "type": "outflow"
+      "velocity": {
+        "type": "outflow"
+      }
     },
     "y_min": {
-      "type": "periodic"
+      "velocity": {
+        "type": "periodic"
+      }
     },
     "y_max": {
-      "type": "periodic"
+      "velocity": {
+        "type": "periodic"
+      }
     },
     "z_min": {
-      "type": "wall"
+      "velocity": {
+        "type": "wall"
+      }
     },
     "z_max": {
-      "type": "wall"
+      "velocity": {
+        "type": "wall"
+      }
     }
   },
   "internal_boundaries": [],

@@ -284,16 +284,24 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
 
     function parse_bc(bc_data)
         if bc_data isa AbstractString
-            error("external_boundaries must be an object with {type, value}; string shorthand is not allowed.")
+            error("external_boundaries must be an object with velocity.type/value; string shorthand is not allowed.")
         end
-        if !haskey(bc_data, :type)
-            if haskey(bc_data, :velocity)
-                error("external_boundaries must use \"type\" (\"velocity\" is deprecated).")
-            end
-            error("external_boundaries must specify \"type\".")
+        if haskey(bc_data, :type)
+            error("external_boundaries must use velocity.type (top-level \"type\" is not allowed).")
+        end
+        if !haskey(bc_data, :velocity)
+            error("external_boundaries must specify \"velocity\" object.")
         end
 
-        type_str = lowercase(String(bc_data.type))
+        vel_obj = bc_data.velocity
+        if vel_obj isa AbstractString
+            error("external_boundaries.velocity must be an object with type/value.")
+        end
+        if !haskey(vel_obj, :type)
+            error("external_boundaries.velocity must specify \"type\".")
+        end
+
+        type_str = lowercase(String(vel_obj.type))
         # 廃止キーワードのチェック
         if type_str in ["inlet", "outlet", "dirichlet", "neumann"]
             error("Deprecated BC keyword '$(type_str)'. Use 'inflow'/'outflow' instead. For openings, use 'openings' array.")
@@ -313,10 +321,10 @@ function load_boundary_conditions(filepath::String, dim_params::DimensionParams)
                   end
         val = (0.0, 0.0, 0.0)
         if bc_type == Inflow || bc_type == SlidingWall
-            if !haskey(bc_data, :value)
-                error("$(bc_type) boundary requires 'value' field.")
+            if !haskey(vel_obj, :value)
+                error("$(bc_type) boundary requires velocity.value field.")
             end
-            val_dim = parse_tuple3(bc_data.value)
+            val_dim = parse_tuple3(vel_obj.value)
             val = val_dim ./ U0
         end
         return ExternalBC(bc_type, val)
