@@ -98,14 +98,14 @@ Outflow境界では粘性項をゼロとし、対流項のみで流出条件を�
 
 SPH出力とチェックポイントのフォーマットを仕様に合わせる
 
-- [ ] 8.1: SPHのDZを非等間隔時Lz/Nzに変更
-- [ ] 8.2: SPHベクトル出力をu,v,wブロック順に変更（インターリーブ廃止）
-- [ ] 8.3: Checkpointのエンディアンをリトルエンディアン固定に変更
-- [ ] 8.4: is_dimensional検証（0以外はエラー）を追加
-- [ ] 8.5: Reference_Length/Velocityのリスタート時一致確認を実装（不一致時は警告）
-- [ ] 8.6: SPHは常に有次元量で出力（velocity/pressure/vel_avg）
-- [ ] 8.7: SPHレコード構成（Time/Step/Origin/Pitch）を仕様通りに固定
-- [ ] 8.8: SPH出力を単精度（Float32）・Fortran unformatted互換で確認
+- [x] 8.1: SPHのDZを非等間隔時Lz/Nzに変更
+- [x] 8.2: SPHベクトル出力をu,v,wブロック順に変更（インターリーブ廃止）
+- [x] 8.3: Checkpointのエンディアンをリトルエンディアン固定に変更
+- [x] 8.4: is_dimensional検証（0以外はエラー）を追加
+- [x] 8.5: Reference_Length/Velocityのリスタート時一致確認を実装（不一致時は警告）
+- [x] 8.6: SPHは常に有次元量で出力（velocity/pressure/vel_avg）
+- [x] 8.7: SPHレコード構成（Time/Step/Origin/Pitch）を仕様通りに固定
+- [x] 8.8: SPH出力を単精度（Float32）・Fortran unformatted互換で確認
 
 ---
 
@@ -114,9 +114,9 @@ SPH出力とチェックポイントのフォーマットを仕様に合わせ�
 
 Start_time_for_averaging以降のWelford法による時間平均と出力
 
-- [ ] 9.1: update_time_average!をメインループから呼び出し
-- [ ] 9.2: 平均化開始時刻の判定処理を追加
-- [ ] 9.3: vel_avg SPHファイル出力を実装
+- [x] 9.1: update_time_average!をメインループから呼び出し
+- [x] 9.2: 平均化開始時刻の判定処理を追加
+- [x] 9.3: vel_avg SPHファイル出力を実装
 
 ---
 
@@ -125,10 +125,10 @@ Start_time_for_averaging以降のWelford法による時間平均と出力
 
 velocity/pressure選択、ベクトル表示、テキスト出力の対応
 
-- [ ] 10.1: variables指定（velocity/pressure）に基づくコンター描画を実装
-- [ ] 10.2: vector_enabled時のベクトル矢印表示を実装
-- [ ] 10.3: text_output時の断面テキストファイル出力を実装
-- [ ] 10.4: 断面出力は有次元量で出力する
+- [x] 10.1: variables指定（velocity/pressure）に基づくコンター描画を実装
+- [x] 10.2: vector_enabled時のベクトル矢印表示を実装
+- [x] 10.3: text_output時の断面テキストファイル出力を実装
+- [x] 10.4: 断面出力は有次元量で出力する
 
 ---
 
@@ -137,10 +137,10 @@ velocity/pressure選択、ベクトル表示、テキスト出力の対応
 
 計算中も各ステップでCFL/拡散数を監視し、条件違反時は停止
 
-- [ ] 11.1: compute_cfl_max/compute_diffusion_maxをメインループで呼び出し
-- [ ] 11.2: 条件違反時の警告・停止処理を実装
-- [ ] 11.3: Monitorにcfl_max出力を追加
-- [ ] 11.4: dry_run時は警告のみで停止しない挙動を明記・実装
+- [x] 11.1: compute_cfl_max/compute_diffusion_maxをメインループで呼び出し
+- [x] 11.2: 条件違反時の警告・停止処理を実装
+- [x] 11.3: Monitorにcfl_max出力を追加
+- [x] 11.4: dry_run時は警告のみで停止しない挙動を明記・実装
 
 ---
 
@@ -149,10 +149,10 @@ velocity/pressure選択、ベクトル表示、テキスト出力の対応
 
 f⁻用の右側再構成関数を追加
 
-- [ ] 12.1: weno3_reconstruct_right関数を実装（左右反転ステンシル）
-- [ ] 12.2: add_convection_flux!で右側再構成を使用
-- [ ] 12.3: WENO3の入力がセル平均であることを明記・確認
-- [ ] 12.4: 非等間隔格子対応のWENO係数を実装・検証
+- [x] 12.1: weno3_reconstruct_right関数を実装（左右反転ステンシル）
+- [x] 12.2: add_convection_flux!で右側再構成を使用
+- [x] 12.3: WENO3の入力がセル平均であることを明記・確認
+- [x] 12.4: 非等間隔格子対応のWENO係数を実装・検証
 
 ---
 
@@ -161,9 +161,9 @@ f⁻用の右側再構成関数を追加
 
 シミュレーション開始前に計算条件を出力
 
-- [ ] 13.1: condition.txt出力関数を実装
-- [ ] 13.2: 物理パラメータ、格子、時間積分、境界条件、出力間隔を記録
-- [ ] 13.3: condition.txtにOpening/内部境界/境界優先順位/動的マスク設定を含める
+- [x] 13.1: condition.txt出力関数を実装
+- [x] 13.2: 物理パラメータ、格子、時間積分、境界条件、出力間隔を記録
+- [x] 13.3: condition.txtにOpening/内部境界/境界優先順位/動的マスク設定を含める
 
 ---
 
@@ -172,10 +172,10 @@ f⁻用の右側再構成関数を追加
 
 全機能の動作確認とベンチマーク検証
 
-- [ ] 14.1: 新スキーマJSONでの読み込みテスト
-- [ ] 14.2: 3Dキャビティフロー検証ケースの実行
-- [ ] 14.3: SPH/Checkpoint出力の検証
-- [ ] 14.4: リスタート機能の検証
+- [x] 14.1: 新スキーマJSONでの読み込みテスト
+- [x] 14.2: 3Dキャビティフロー検証ケースの実行
+- [x] 14.3: SPH/Checkpoint出力の検証
+- [x] 14.4: リスタート機能の検証
 
 ---
 
@@ -184,11 +184,11 @@ f⁻用の右側再構成関数を追加
 
 Z_grid.type=non-uniform時のZ座標ファイル読み込みと格子生成
 
-- [ ] 15.1: read_z_grid_file関数の実装（格子点数=Nz+5の検証含む）
-- [ ] 15.2: Z_grid.type切り替えロジックの実装（uniform/non-uniform）
-- [ ] 15.3: 非等間隔格子でのWENO3係数計算の検証テスト
-- [ ] 15.4: SmagorinskyのΔを局所セル幅で評価する実装と検証
-- [ ] 15.5: non-uniform時のLz算出（z_{Nz+3}-z_{3}）とDZ=Lz/Nzの保持
+- [x] 15.1: read_z_grid_file関数の実装（格子点数=Nz+5の検証含む）
+- [x] 15.2: Z_grid.type切り替えロジックの実装（uniform/non-uniform）
+- [x] 15.3: 非等間隔格子でのWENO3係数計算の検証テスト
+- [x] 15.4: SmagorinskyのΔを局所セル幅で評価する実装と検証
+- [x] 15.5: non-uniform時のLz算出（z_{Nz+3}-z_{3}）とDZ=Lz/Nzの保持
 
 ---
 
@@ -197,9 +197,9 @@ Z_grid.type=non-uniform時のZ座標ファイル読み込みと格子生成
 
 壁面スライド駆動（接線速度指定、法線速度ゼロ）の実装
 
-- [ ] 16.1: 境界面ごとの速度成分解釈を実装（法線成分無視、接線成分適用）
-- [ ] 16.2: ゴーストセルマスク=0の設定
-- [ ] 16.3: 壁面せん断流束の補正をDiffusionモジュールに追加
+- [x] 16.1: 境界面ごとの速度成分解釈を実装（法線成分無視、接線成分適用）
+- [x] 16.2: ゴーストセルマスク=0の設定
+- [x] 16.3: 壁面せん断流束の補正をDiffusionモジュールに追加
 
 ---
 
@@ -208,10 +208,10 @@ Z_grid.type=non-uniform時のZ座標ファイル読み込みと格子生成
 
 Euler以外の時間積分スキームの実装
 
-- [ ] 17.1: RKBuffers構造体の条件付き確保ロジック
-- [ ] 17.2: rk2_step!（Heun法）の実装（Butcher tableau準拠）
-- [ ] 17.3: rk4_step!（古典的4段RK）の実装
-- [ ] 17.4: Time_Integration_Scheme切り替えロジックの実装
+- [x] 17.1: RKBuffers構造体の条件付き確保ロジック
+- [x] 17.2: rk2_step!（Heun法）の実装（Butcher tableau準拠）
+- [x] 17.3: rk4_step!（古典的4段RK）の実装
+- [x] 17.4: Time_Integration_Scheme切り替えロジックの実装
 
 ---
 
@@ -220,9 +220,9 @@ Euler以外の時間積分スキームの実装
 
 ドライラン時のメモリチェックと実行可否判定
 
-- [ ] 18.1: estimate_memory_size関数の実装（CFDBuffers + Krylov + RK配列）
-- [ ] 18.2: Sys.free_memory()/Sys.total_memory()との比較
-- [ ] 18.3: 警告出力と実行可否判定の表示
+- [x] 18.1: estimate_memory_size関数の実装（CFDBuffers + Krylov + RK配列）
+- [x] 18.2: Sys.free_memory()/Sys.total_memory()との比較
+- [x] 18.3: 警告出力と実行可否判定の表示
 
 ---
 
@@ -231,9 +231,9 @@ Euler以外の時間積分スキームの実装
 
 divMax位置(i,j,k)の出力とフォーマット調整
 
-- [ ] 19.1: compute_divergence_max関数に位置情報の返却を追加
-- [ ] 19.2: MonitorDataにdiv_max_pos::NTuple{3,Int}を追加
-- [ ] 19.3: history.txt/コンソール出力フォーマットの更新
+- [x] 19.1: compute_divergence_max関数に位置情報の返却を追加
+- [x] 19.2: MonitorDataにdiv_max_pos::NTuple{3,Int}を追加
+- [x] 19.3: history.txt/コンソール出力フォーマットの更新
 
 ---
 
@@ -242,9 +242,9 @@ divMax位置(i,j,k)の出力とフォーマット調整
 
 Outflow境界での逆流時にフラックスをゼロクリップ
 
-- [ ] 20.1: 逆流検出ロジックの実装（法線方向速度の符号判定）
-- [ ] 20.2: 対流フラックスのゼロクリップ処理
-- [ ] 20.3: オプションパラメータ（reverse_flow_stabilization）の追加
+- [x] 20.1: 逆流検出ロジックの実装（法線方向速度の符号判定）
+- [x] 20.2: 対流フラックスのゼロクリップ処理
+- [x] 20.3: オプションパラメータ（reverse_flow_stabilization）の追加
 
 ---
 
