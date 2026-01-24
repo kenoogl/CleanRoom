@@ -25,11 +25,14 @@
 | 用語 | 定義 |
 | ---- | ---- |
 | セル | 有限体積法の制御体積。物理量（速度、圧力等）はセル中心に配置 |
+| セルフェイス | セルを構成する6面。流束と補助物理量（速度）を配置 |
+| コロケート格子 | プライマリな物理量をセルセンター、補助物理量をセルフェイスに配置する格子 |
 | 格子点 | セルの界面（稜線）上の点。隣接セルの境界を定義 |
 | 内部セル | 計算対象となる物理領域内のセル |
-| ゴーストセル | 境界条件適用のため内部セルの外側に設けた仮想セル |
+| ゴーストセル | 境界条件適用のため内部セルの外側に設けた仮想セル。本仕様ではHALO/ガイドセルと同義 |
 | セル幅 | 隣接する格子点間の距離（= セルのサイズ） |
 | Nx, Ny, Nz | 各軸方向の内部セル数 |
+
 
 ```
 格子点（界面）とセルの関係（1次元の例、Nz=3の場合）:
@@ -61,19 +64,20 @@
 ...
 ```
 
-- 格子点数はセル界面数（HALO領域含む）を表す。Nz個の物理セルに対して、格子点数 = Nz + 5 となる（全Nz+4セルを区切る界面点数）
+- 格子点数はセル界面数（ゴーストセル/HALO/ガイドセルを含む）を表す。Nz個の物理セルに対して、格子点数 = Nz + 5 となる（全Nz+4セルを区切る界面点数）
 - 番号は1オリジン（Julia準拠）。1から格子点数（Nz+5）までの連番
-  - 番号1〜2: z_min側HALOセル界面（外挿点）
+  - 番号1〜2: z_min側ゴーストセル（HALO/ガイドセル）界面（外挿点）
   - 番号3〜Nz+3: 物理領域セル界面（番号3がz_min境界、番号Nz+3がz_max境界）
-  - 番号Nz+4〜Nz+5: z_max側HALOセル界面（外挿点）
+  - 番号Nz+4〜Nz+5: z_max側ゴーストセル（HALO/ガイドセル）界面（外挿点）
 - 座標値は`Origin_of_Region[3]`（Z方向基点）からの相対座標[m]で記述する
 
 ### Requirement 2: 支配方程式・乱流モデル
 **Objective:** As a シミュレーションエンジニア, I want 弱圧縮性Navier-Stokes方程式とLESモデルを使用できる, so that クリーンルーム内の乱流場を解析できる
 
 #### Acceptance Criteria
-1. The Solver shall 弱圧縮性を考慮した非圧縮性Navier-Stokes方程式を解く（連続の式はref_eq.pdfの1.27式に準拠）
-2. The Solver shall 標準Smagorinskyモデルによる乱流粘性を計算する（詳細はref_eq.pdf pp.13-14に準拠）
+1. The Solver shall 弱圧縮性を考慮した非圧縮性Navier-Stokes方程式を解く。この場合の連続式は$M^2 \frac{\partial p}{\partial t} + \frac{\partial u_i}{\partial x_i} = 0, M=u/c$　ここで$c$は音速
+
+2. The Solver shall 標準Smagorinskyモデルによる乱流粘性を計算する。フィルタ幅Δの定義 (ΔxΔyΔz)^(1/3)。非等間隔格子では局所セル幅（Δx_i, Δy_j, Δz_k）を用いる
 3. The Solver shall Smagorinsky定数Csをパラメータとして受け付ける（デフォルト: 0.2）
 
 ### Requirement 3: 入力データの無次元化
@@ -113,10 +117,14 @@
 
 #### Acceptance Criteria
 1. The Solver shall 有限体積法・セルセンター変数配置を使用する
-2. The Solver shall 対流項にWENO3スキームを適用する
-3. The Solver shall 拡散項およびその他の項に2次精度中心差分を適用する
-4. The Solver shall Lax-Friedrichsフラックス分割を使用する
-5. The Solver shall 非等間隔格子に対応したWENO再構成を実装する
+2. The Solver shall 3次元計算専用として動作する 
+3. The Solver shall Fractional Step法による速度圧力分離解法を使用する
+4. The Solver shall コロケート格子を使用する
+5. The Solver shall 対流項にWENO3スキームを適用し、Lax-Friedrichsフラックス分割を使用する
+6. The Solver shall WENO3スキームでは非等間隔格子に対応したWENO再構成を実装する
+7. The Solver shall WENO3再構成の入力をセル平均値として扱う
+8. The Solver shall 拡散項およびその他の項に2次精度中心差分を適用する
+9. The Solver shall セル単位の物体表現、境界条件処理のため、マスクを利用する
 
 #### WENO3フラックス分割
 
@@ -153,6 +161,7 @@ f±(u) = (1/2)(f(u) ± α·u)
 - セル中心：x_i
 - 入力はセル平均値 ū_i
 - 再構成点：x_{i+1/2}（左側再構成 u⁻_{i+1/2}）
+- 再構成対象がセル平均値である
 
 **候補多項式（線形再構成）:**
 
@@ -244,41 +253,50 @@ u⁻_{i+1/2} = ω₀·q₀ + ω₁·q₁
 **Objective:** As a シミュレーションエンジニア, I want Fractional Step法で圧力と速度を分離できる, so that 非圧縮性条件を満たす速度場が得られる
 
 #### Acceptance Criteria
-1. The Solver shall 弱い圧縮性を考慮した連続の式（Eq 1.27）に対応するFractional Step法により圧力-速度分離を行う
-2. The Solver shall 対流流束・粘性流束から擬似速度をセルセンターで計算する
-3. The Solver shall 擬似速度をセルフェイス（スタガード位置）に内挿する
-4. The Solver shall セルフェイス擬似速度からコンパクトステンシルでセルの発散値を計算し、ポアソン方程式のソース項とする
-5. The Solver shall 擬似速度場に対して速度境界条件を適用してからフェイス内挿を行う
-6. The Solver shall 圧力勾配によりセルフェイス速度を修正する
-7. The Solver shall 両側フェイスの圧力勾配の平均によりセルセンター速度を修正する
-8. The Solver shall 発散値は常にセルフェイス速度を用いて計算する
-9. The Solver shall 壁面境界ではマスクによりNeumann条件を課す（圧力勾配にm=0を掛ける）
+1. The Solver shall 弱い圧縮性を考慮した連続の式に対応するFractional Step法により圧力-速度分離を行う
+$$
+弱圧縮の連続の式：\quad M^2 \frac{\partial p}{\partial t} + \frac{\partial u_i}{\partial x_i} = 0, M=u_ref/c \\
+Fractional Step法の射影ステップ：\quad u_i^{n+1}=u_i^*-Δt\frac{\partial p^{n+1}}{\partial x_i}, u^*は擬似速度ベクトル\\
+Poisson 方程式：\quad \frac{\partial^2 p^{n+1}}{\partial x_i^2} = \frac{1}{\Delta t}\left( \frac{\partial u_i^*}{\partial x_i} + M^2 \frac{\partial p^{n+1}}{\partial t} \right) \\
+$$
+
+2. The Solver shall 対流流束・粘性流束をセルフェイスで評価し、擬似速度をセルセンターで計算する
+3. The Solver shall 擬似速度場に対して速度境界条件を適用する
+4. The Solver shall 擬似速度をセルフェイス（スタガード位置）に内挿する。このときマスク値を用いて壁面境界と対称面境界でノイマン条件(∂u/∂n=0)を課す
+5. The Solver shall セルフェイス擬似速度からコンパクトステンシルでセルの発散値を計算し、ポアソン方程式のソース項とする
+6. The Solver shall 圧力計算の前に外部境界条件に応じてゴーストセルのマスクを0に変更する
+7. The Solver shall 圧力のポアソン方程式を反復法により解く
+8. The Solver shall 圧力勾配によりセルフェイス速度を修正する
+9. The Solver shall 両側フェイスの圧力勾配の平均によりセルセンター速度を修正する
+10. The Solver shall ゴーストセルのマスクを1に戻す
+11. The Solver shall セルフェイスで速度の境界条件を適用する 
+12. The Solver shall セルセンターで速度の境界条件を適用する
+13. The Solver shall 発散値は常にセルフェイス速度を用いて計算する
 
 #### スタガード配置への内挿
 
 セルセンター変数配置でFractional Step法を適用する場合、速度場と圧力場のデカップリング（チェッカーボード不安定性）を防止するため、以下の手順で発散を計算する：
 
 1. **擬似速度計算**: セルセンターで擬似速度ベクトル (u*, v*, w*) を計算
-2. **セルフェイスへの内挿**: 擬似速度を各軸方向のセルフェイスに内挿
+2. **セルフェイスへの内挿**: 擬似速度を各軸方向のセルフェイスに内挿、このときマスク値でノイマン条件を課す
    ```
-   u*_{i+1/2,j,k} = (u*_{i,j,k} + u*_{i+1,j,k}) / 2
-   v*_{i,j+1/2,k} = (v*_{i,j,k} + v*_{i,j+1,k}) / 2
-   w*_{i,j,k+1/2} = (w*_{i,j,k} + w*_{i,j,k+1}) / 2
+   u*_{i-1/2,j,k} = (u*_{i,j,k} + u*_{i-1,j,k}) / 2 * m_{i,j,k}*m_{i-1,j,k} 
+   v*_{i,j-1/2,k} = (v*_{i,j,k} + v*_{i,j-1,k}) / 2 * m_{i,j,k}*m_{i,j-1,k}
+   w*_{i,j,k-1/2} = (w*_{i,j,k} + w*_{i,j,k-1}) / 2 * m_{i,j,k}*m_{i,j,k-1}
    ```
 3. **発散計算（コンパクトステンシル）**: セルフェイス値を用いてセルの発散を計算
    ```
    div_{i,j,k} = (u*_{i+1/2} - u*_{i-1/2})/Δx + (v*_{j+1/2} - v*_{j-1/2})/Δy + (w*_{k+1/2} - w*_{k-1/2})/Δz
-   ```
    コンパクトステンシルにより、チェッカーボード不安定性を防止し、保存性を保証する
 4. **ポアソン方程式**: この発散値がソース項となる
 5. **セルフェイス速度の修正**: 圧力勾配でセルフェイス速度を修正
    ```
-   u^{n+1}_{i+1/2} = u*_{i+1/2} - Δt * (p_{i+1} - p_i)/Δx
+   u^{n+1}_{i-1/2} = u*_{i-1/2} - Δt * (p_{i} - p_{i-1})/Δx
    ```
 6. **セルセンター速度の修正**: 両側フェイスの圧力勾配の平均でセルセンター速度を修正
    ```
    u^{n+1}_i = u*_i - Δt * 0.5 * [(p_i - p_{i-1})/Δx * m_{i-1} + (p_{i+1} - p_i)/Δx * m_{i+1}]
-   ```
+   
    ここで m はマスク値（壁面では0、流体では1）で、Neumann条件を課す
 
 ※ この内挿処理により、隣接セル間の圧力結合が保証され、チェッカーボードパターンの発生を抑制する
@@ -287,20 +305,21 @@ u⁻_{i+1/2} = ω₀·q₀ + ω₁·q₁
 **Objective:** As a シミュレーションエンジニア, I want 圧力ポアソン方程式を反復法で解ける, so that 圧力場を効率的に計算できる
 
 #### Acceptance Criteria
-#### Acceptance Criteria
 1. The Solver shall Red-Black SOR法による反復解法を実装する（必須）
 2. Where CG法が選択された場合, the Solver shall 共役勾配法を適用する（オプション）
 3. Where BiCGSTAB法が選択された場合, the Solver shall BiCGSTAB法を適用する（オプション）
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
 5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
 6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 5 sweep）を適用する
-7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算する（全周Neumann条件によるドリフト防止）
+7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算する（圧力境界条件の定数不定性によるドリフト防止）
+8. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
+9. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
 
 #### 圧力平均値の引き戻し
 
-圧力境界条件は、Fractional Step法の整合性のため全境界でNeumann条件（$\partial p / \partial n = 0$）とする。
+圧力境界条件は、Fractional Step法の整合性のためPeriodic境界では周期条件、それ以外の外部境界ではNeumann条件（$\partial p / \partial n = 0$）とする。
 このためポアソン方程式の解は定数分の不定性を持ち、時間積分に伴い圧力レベルがドリフトする可能性がある。
-これを防ぐため、境界条件の種類（Outflow等の有無）に関わらず、各ステップで必ず以下の処理を行う：
+これを防ぐため、境界条件の種類に関わらず、各ステップで必ず以下の処理を行う：
 
 ```
 p_avg = (1/N) Σ p_i      # 流体セルの空間平均
@@ -315,7 +334,7 @@ p_i = p_i - p_avg        # 全流体セルから平均値を減算
 線形方程式 Ax = b に対して、残差を以下で定義する：
 
 ```
-SOR残差 = ||r||₂ / Res0
+SOR残差 = ||r||₂ / ||r0||₂
 CG/BiCGSTAB残差 = ||r||₂ / ||r0||₂
 ```
 
@@ -340,32 +359,38 @@ r0 = b - A x0
 **Objective:** As a シミュレーションエンジニア, I want 各種境界条件を設定できる, so that 実際のクリーンルーム環境を模擬できる
 
 #### Acceptance Criteria
-1. The Solver shall 外部境界（6面）に対して標準条件（wall, symmetric, periodic, outflow, SlidingWall）および流入条件（Inlet）を速度に適用できる
-2. The Solver shall 全ての外部境界の圧力にNeumann条件（$\partial p / \partial n = 0$）を適用する
-3. The Solver shall 壁面にデフォルトで粘着条件（速度）とNeumann条件（圧力）を適用する
-4. When 吹出口・吸込口が指定された時, the Solver shall 座標指定で速度を設定する
-5. The Solver shall 領域内の部分境界（矩形/円筒領域）に法線・速度を指定できる
+1. The Solver shall 外部境界（6面）に対して標準条件（Wall, Symmetric, Periodic, Outflow, SlidingWall, Inflow, Opening）を速度に適用できる
+2. The Solver shall Periodicを除く全ての外部境界の圧力にNeumann条件（$\partial p / \partial n = 0$）を適用する
+3. The Solver shall Periodic境界の圧力に周期条件を適用する
+4. The Solver shall 壁面にデフォルトで粘着条件（速度）とNeumann条件（圧力）を適用する
+5. When 吹出口・吸込口として利用するOpeningが指定された時, the Solver shall 座標指定で速度を設定する
 6. The Solver shall 対流流出条件の輸送速度を該当境界面の平均速度とする
 7. The Solver shall 周期境界条件を外部境界のペア（x_min/x_max, y_min/y_max, z_min/z_max）に適用できる
 8. The Solver shall 対称境界条件で法線方向速度成分をゼロ、接線方向速度成分の勾配をゼロとする
 
 | 種別               | 速度                                            | 圧力    |
 | ------------------ | ----------------------------------------------- | ------- |
-| 外部境界           | 壁 (wall) / 対称 (symmetric) / 周期 (periodic) / 対流流出 (outflow) / 滑り壁 (SlidingWall) / 流入 (Inlet) | Neumann / 周期 |
+| 外部境界           | 壁 (Wall) / 対称 (Symmetric) / 周期 (Periodic) / 対流流出 (Outflow) / 滑り壁 (SlidingWall) / 流入 (Inflow) / 開口部(Opening) | 全周ノイマン条件 / 周期境界 |
 
-※ `dirichlet` は廃止され、流入条件は `Inlet`、壁面駆動は `SlidingWall` を使用する。JSON互換性のため `dirichlet` は読み込み時に `Inlet` として扱われる。
+※ `dirichlet` と`neumann`などのプリミティブなキーワードは利用しない。流入条件は `Inflow`、壁面は `Wall`、対称境界は `Symmetric`、周期境界は `Periodic`、対流流出は `Outflow`、壁面スライド駆動は `SlidingWall` を使用する。`Opening`は外部境界面の壁に空いた穴で部分的に速度を固定する。
 
-※ 周期境界を除く外部境界のうち、`Wall`, `Symmetric`, `SlidingWall` において、ゴーストセルのマスク値は常時 `0`（固体相当）に設定される。一方、`Inlet` および `Outflow` は、対流項計算時にゴーストセルの値を有効活用するため、デフォルトではマスク値 `1`（流体相当）として扱う。
+※ `Wall`, `Symmetric`, `SlidingWall` において、境界面での対流流束と粘性流束はゼロとなるため、ゴーストセルのマスク値を常時 `0`（固体相当）に設定する。
 
-※ ただし、圧力ソルバー内でNeumann条件（$\partial p / \partial n = 0$）を自然に満たすため、**圧力反復計算の間だけ、`Outflow` 境界のマスク値を一時的に `0` に変更する。** 圧力計算終了後は再び `1` に戻す（動的マスク処理）。
+※ `Periodic`は流体セルとして扱うのでゴーストセルのマスク値は常に `1`（流体相当）に設定する。
 
-※ マスク `0` 化（常時または一時的）に伴う速度拡散項（粘性項）および対流項の不整合を防ぐため、以下の補正を行う：
-  - `Wall`, `SlidingWall`: 壁面せん断流束を加算（例: $2 \nu_{eff} (U_{wall} - u) / \Delta n^2$）
-  - `Inlet`: 流入境界値との差分に基づく拡散流束を明示的に加算する。対流項はマスク `1` のためWENO3で自然に計算される。
-  - `Outflow`: 拡散項は補正なし（勾配ゼロ）。対流項はマスク `1` のためWENO3で自然に計算される。
-  - **逆流安定化**: `Outflow` において流れが領域内に逆流している場合、不安定化を防ぐために対流項の寄与をゼロにクリップする。
+※ `SlidingWall`は設定する境界面の接線方向成分の速度を指定する。法線方向成分の速度はゼロとする。
 
-※ Neumann条件は境界面の法線方向勾配（∂φ/∂n）を指定する
+※ `Inflow`は設定する境界面の速度を指定する。マスク値は `1`（流体相当）とする。
+※ `Inflow` / `Opening` / `SlidingWall` の速度は一様固定（時間依存やプロファイル指定は非対応）とする。
+
+※ `Outflow`、`Inflow`、`Opening`は、対流項計算時にゴーストセルの値を有効活用するため、デフォルトではマスク値 `1`（流体相当）として扱う。ただし、圧力ソルバー内でNeumann条件（$\partial p / \partial n = 0$）を自然に満たすため、**圧力反復計算の間だけ、境界のマスク値を一時的に `0` に変更する。** 圧力計算終了後は再び `1` に戻す（動的マスク処理）。
+
+※ `Outflow`の対流流出条件は粘性項を含まないので、計算時に粘性項をゼロに設定する。対流項の計算はマスク `1` としてWENO3で自然に計算する。
+  - **逆流安定化**: `Outflow` において流れが領域内に逆流している場合、不安定化を防ぐために対流項の寄与をゼロにクリップするオプションを提供する。
+
+※ `Opening`には、サブ属性として`inlet`と`outlet`の2種類を設定できる。サブ属性が`inlet`の場合は、`Inflow`と同様の処理を行う。サブ属性が`outlet`の場合は、`Outflow`と同様の処理を行う。  
+
+※ `internal_boundaries` は物体として扱い、対象領域のマスク値を `0`（固体相当）に設定する。指定された速度ベクトルは物体内部速度として適用し、移動壁（SlidingWall相当）として扱う。
 
 #### 周期境界条件
 
@@ -400,7 +425,7 @@ Ghost(max側) ← Inner(min側)
 - φ_neighbor: 境界に隣接する内部セルの値
 - Δx, Δy, Δz: セル幅（非等間隔格子では局所セル幅を使用）
 
-※ 壁面（粘着条件）は `"velocity": "dirichlet", "value": [0.0, 0.0, 0.0]` で指定
+※ 壁面（粘着条件）は速度ゼロ
 
 
 #### 対称境界条件
@@ -455,11 +480,11 @@ w[1, j, k] = w[4, j, k]
 
 セルが複数の境界条件の対象となる場合、以下の優先順位で適用する：
 
-| 優先度 | 種別 | 説明 |
-| ------ | ---- | ---- |
-| 1（最高） | 内部境界 | 吹出口・吸込口、領域内の部分境界 |
-| 2 | 物体 | ボクセル法で表現された障害物 |
-| 3（最低） | 外部境界 | 計算領域の6面 |
+| 優先度 | 種別 | 対応JSONキー | 説明 |
+| :--- | :--- | :--- | :--- |
+| 1（最高） | 内部境界・開口部 | `openings`, `internal_boundaries` | 吹出口・吸込口、領域内の部分境界 |
+| 2 | 物体 | `objects` (Geometry JSON) | ボクセル法で表現された障害物 |
+| 3（最低） | 外部境界 | `external_boundaries` | 計算領域の6面 |
 
 ### Requirement 9: 物体表現
 **Objective:** As a シミュレーションエンジニア, I want 計算領域内に障害物を配置できる, so that クリーンルーム内の設備を模擬できる
@@ -492,7 +517,7 @@ w[1, j, k] = w[4, j, k]
       "center": [3.0, 3.0, 0.0],           // [m] 底面中心座標
       "radius": 0.3,                       // [m] 半径
       "height": 2.5,                       // [m] 高さ
-      "axis": "z",                         // (x | y | z) 軸方向
+      "axis": "z",                         // (x | y | z) 軸方向、z方向指定で上記の場合、高さ方向がz=0の面と平行となり、中心はx=3，ｙ＝3を通りｚ軸と並行
       "velocity": [0.0, 0.0, 0.0]          // [m/s] 物体内部速度Vs（デフォルト: [0.0, 0.0, 0.0]）
     },
     {
@@ -519,9 +544,10 @@ w[1, j, k] = w[4, j, k]
 **Objective:** As a シミュレーションエンジニア, I want HALO領域を確保できる, so that 将来の分散並列計算に対応できる
 
 #### Acceptance Criteria
-1. The Solver shall Z方向の外部境界（z_min側およびz_max側の両方）にステンシル幅分のHALO領域を確保する
+1. The Solver shall HALO/ゴーストセル/ガイドセルを同義として扱い、XYZ全方向にステンシル幅分（2セル）の領域を確保する
 
-※ XY方向は等間隔格子であり、HALO領域は不要（Z方向のみ非等間隔格子をサポート）
+※ 全方向の物理量配列（u, v, w, p）はNx+4, Ny+4, Nz+4のサイズとし、境界条件・WENO3のためにゴーストセルを使用する
+※ 格子座標の入力はZ方向のみ非等間隔を許可するため、XY方向のHALO座標は等間隔生成で補う
 
 ### Requirement 11: 入出力
 **Objective:** As a シミュレーションエンジニア, I want 各種ファイル形式で入出力できる, so that パラメータ設定と可視化ツールとの連携ができる
@@ -565,7 +591,7 @@ w[1, j, k] = w[4, j, k]
 | step | タイムステップ数（左詰め、可変幅パディング） |
 | time | 計算時刻（%.6e） |
 | Umax | 速度の最大値（%.4e） |
-| divMax | 速度の発散値の最大値（%.4e） |
+| divMax | 速度の発散値の最大値（%.4e） とその位置(i,j,k) |
 | dU | 速度変動量（%.4e）定常状態判定用 |
 | ItrP | 圧力反復回数（整数） |
 | ResP | 圧力反復残差（%.5e） |
@@ -586,7 +612,7 @@ w[1, j, k] = w[4, j, k]
 
 #### condition.txtファイル仕様
 
-シミュレーション開始前に計算条件を出力する：
+シミュレーション開始前に、再現性を担保するための、計算条件や環境を出力する：
 
 - ファイル名: `condition.txt`
 - 出力場所: `dirname(param_file)/output/condition.txt`
@@ -594,7 +620,7 @@ w[1, j, k] = w[4, j, k]
   - 物理パラメータ（L0, U0, ν, Re, T0）
   - 格子パラメータ（格子数、ドメインサイズ、セルサイズ）
   - 時間積分（スキーム、Co、Δt*、Δt、最大ステップ、総計算時間）
-  - 境界条件（外部境界設定、Inlet/Outlet/内部境界数）
+  - 境界条件（外部境界設定、Inflow/Outflow/内部境界数）
   - ポアソンソルバー（ソルバー種別、収束判定値、最大反復数）
   - 出力間隔
 
@@ -629,6 +655,8 @@ mean_new = mean_old + (x - mean_old) / n
 | 時刻       | step (Int32), time (Float32) |                                         |
 | データ     | 速度成分 (Float32)           | u, v, w の順に配列を記述               |
 
+※ Z_grid.type=non-uniform時は Lz = z_{Nz+3} - z_{3} とし、DZ = Lz / Nz を格納する
+
 **座標系の注意:**
 - 原点座標（XORG, YORG, ZORG）は最初のセルの**左端（フェイス位置）**を示す
 - セルセンター座標は `x_center[i] = XORG + (i - 0.5) * DX` で計算
@@ -648,6 +676,8 @@ mean_new = mean_old + (x - mean_old) / n
 | ピッチ     | DX, DY, DZ (Float32)         | 不等間隔でも等間隔値(Lx/Nx等)を格納     |
 | 時刻       | step (Int32), time (Float32) |                                         |
 | データ     | 圧力 (Float32)               | スカラー配列を1つ記述                   |
+
+※ DZの扱いはベクトル出力と同様とする
 
 ※ 圧力SPHファイル（prs_#######.sph）はこの形式で出力する
 
@@ -710,7 +740,7 @@ mean_new = mean_old + (x - mean_old) / n
   "Reference_Velocity": 0.3,              // [m/s] 代表速度
   "Kinematic_Viscosity": 1.5e-5,          // [m²/s] 動粘性係数
   "Smagorinsky_Constant": 0.2,            // [-] Smagorinsky定数Cs（デフォルト: 0.2）
-  "Origin_of_Region": [-2.5, -2.5, 0.0],  // [m] 計算領域基点（ガイドセルを含まない物理領域の各軸最小値）
+  "Origin_of_Region": [-2.5, -2.5, 0.0],  // [m] 計算領域基点（ゴーストセル/HALO/ガイドセルを含まない物理領域の各軸最小値）
   "Domain": {
     "Lx": 5.0,                            // [m] X方向領域長さ
     "Ly": 5.0,                            // [m] Y方向領域長さ
@@ -751,7 +781,7 @@ mean_new = mean_old + (x - mean_old) / n
   },
   "Start_time_for_averaging": 0.0,        // [sec] 平均化開始時刻
   "Time_Integration_Scheme": "Euler",     // (Euler | RK2 | RK4) 時間積分スキーム
-  "divMax_threshold": 1.0e-3,             // [-] 発散検出閾値
+  "divMax_threshold": 1.0e-3,             // [-] 発散検出閾値（無次元）
   "Initial_Condition": {
     "velocity": [0.0, 0.0, 0.0],          // [m/s] 初期速度ベクトル（一様）
     "pressure": 0.0                        // [Pa] 初期圧力値（一様）
@@ -761,6 +791,8 @@ mean_new = mean_old + (x - mean_old) / n
   }
 }
 ```
+
+※ JSON内のキーワード（例: `Euler`, `RK2`, `RK4`, `yes/no` など）は大文字小文字が混在するため、**パース時に小文字へ正規化して照合する**。
 
 #### 時間刻みと安定条件
 
@@ -773,13 +805,15 @@ mean_new = mean_old + (x - mean_old) / n
 ※ 初期静止場（U*_max=0）や低速場では無次元代表速度（=1.0）を下限として使用し、ゼロ除算を回避する
 
 **安定条件チェック:**
-- 拡散数 D = ν*·Δt*/Δx*² を計算し、D < 0.5 を満たすことを確認
+- 拡散数は各方向で評価する：Dx = ν*·Δt*/Δx*_min², Dy = ν*·Δt*/Δy*_min², Dz = ν*·Δt*/Δz*_min²
+- D = max(Dx, Dy, Dz) とし、D < 0.5 を満たすことを確認
 - If 拡散数条件を満たさない場合, then 警告を表示し計算を停止する（dry_run時は警告のみ）
+- 計算中も各ステップでCFL/拡散数を監視し、条件違反時は警告を出して停止する
 
 | 条件 | 式 | 用途 |
 | ---- | -- | ---- |
 | CFL条件（対流） | Co = U·Δt/Δx | Δt決定 |
-| 拡散数条件（粘性） | D = ν·Δt/Δx² < 0.5 | チェックのみ |
+| 拡散数条件（粘性） | D = max(Dx, Dy, Dz) < 0.5 | チェックのみ |
 
 #### ドライラン時のメモリチェック
 
@@ -809,30 +843,40 @@ dry_run有効時に以下を実行する：
 ```json
 {
   "external_boundaries": {
-    "x_min": { "velocity": "dirichlet", "value": [0.3, 0.0, 0.0] },
-    "x_max": { "velocity": "outflow" },
-    "y_min": { "velocity": "periodic" },
-    "y_max": { "velocity": "periodic" },
-    "z_min": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] },
-    "z_max": { "velocity": "dirichlet", "value": [0.0, 0.0, 0.0] }
+    "x_min": { "velocity": "Inflow", "value": [0.3, 0.0, 0.0] },
+    "x_max": { "velocity": "Outflow" },
+    "y_min": { "velocity": "Periodic" },
+    "y_max": { "velocity": "Periodic" },
+    "z_min": { "velocity": "Wall" },
+    "z_max": { "velocity": "Wall" }
   },
-  "inlets": [
+  "openings": [
     {
-      "type": "rectangular",
+      "name": "ceiling_diffuser_1",        // 識別名（任意）
+      "type": "rectangular",               // (rectangular | cylindrical) 形状
+      "boundary": "z_max",                 // 配置する外部境界面
       "position": [0.0, 0.0, 2.5],         // [m] 中心座標
-      "size": [0.5, 0.5],                  // [m] XY方向サイズ
-      "normal": [0, 0, -1],                // 法線方向
-      "velocity": [0.0, 0.0, -0.5]         // [m/s] 速度ベクトル
-    }
-  ],
-  "outlets": [
+      "size": [0.5, 0.5],                  // [m] 境界面に平行な方向のサイズ
+      "flow_type": "inlet",                // (inlet | outlet) サブ属性
+      "velocity": [0.0, 0.0, -0.5]         // [m/s] 速度ベクトル（inlet時に必須）
+    },
     {
+      "name": "floor_exhaust_1",
       "type": "rectangular",
+      "boundary": "z_min",
       "position": [0.0, 0.0, 0.0],
       "size": [0.3, 0.3],
-      "normal": [0, 0, -1],
-      "condition": "outflow",              // (outflow | dirichlet) 境界条件種別
-      "velocity": [0.0, 0.0, -0.3]         // [m/s] 速度ベクトル（dirichlet時に必須）
+      "flow_type": "outlet",               // outlet: 対流流出条件を適用
+      "velocity": [0.0, 0.0, -0.3]         // [m/s] 速度ベクトル（outlet時はオプション、指定時はDirichlet）
+    },
+    {
+      "name": "side_vent_1",
+      "type": "cylindrical",               // 円形開口部の例
+      "boundary": "x_min",
+      "center": [0.0, 1.5, 1.2],           // [m] 中心座標
+      "radius": 0.15,                      // [m] 半径
+      "flow_type": "inlet",
+      "velocity": [0.2, 0.0, 0.0]          // [m/s] 速度ベクトル
     }
   ],
   "internal_boundaries": [
@@ -842,7 +886,6 @@ dry_run有効時に以下を実行する：
         "min": [1.0, 1.0, 0.5],            // [m] 領域最小座標
         "max": [1.5, 1.5, 1.0]             // [m] 領域最大座標
       },
-      "normal": [1, 0, 0],                 // 法線方向
       "velocity": [0.1, 0.0, 0.0]          // [m/s] 速度ベクトル
     },
     {
@@ -851,21 +894,14 @@ dry_run有効時に以下を実行する：
       "radius": 0.2,                       // [m] 半径
       "height": 0.5,                       // [m] 高さ
       "axis": "z",                         // 軸方向
-      "normal": [0, 0, 1],
       "velocity": [0.0, 0.0, 0.2]
     }
   ]
 }
 ```
 
-#### 吸込口（outlets）の境界条件
+※ JSON内のキーワード（例: `Wall`, `Periodic`, `Inflow` など）は大文字小文字が混在するため、**パース時に小文字へ正規化して照合する**。
 
-| condition | 動作 | velocity |
-| --------- | ---- | -------- |
-| dirichlet | 指定速度を適用 | 必須（速度ベクトルを指定） |
-| outflow | 対流流出条件を適用 | 不要（該当断面の平均速度を輸送速度として使用） |
-
-※ `outlets`は`external_boundaries`とは独立した指定体系であり、同一セルに対して両方が指定された場合は`outlets`が優先される（境界条件の優先順位を参照）
 
 ### Requirement 12: 可視化機能
 **Objective:** As a シミュレーションエンジニア, I want 計算結果を可視化できる, so that 流れ場を確認・解析できる
@@ -873,12 +909,12 @@ dry_run有効時に以下を実行する：
 #### Acceptance Criteria
 1. The Solver shall Julia内で可視化機能を実装する（CairoMakieを使用）
 2. The Solver shall Package Extensions機能を用いてCairoMakieへの依存を管理し、非可視化実行時のロード時間を最小化する
-2. The Solver shall 可視化処理を倍精度データのまま実行する
-3. The Solver shall 任意断面（XY, YZ, XZ平面）を抽出・表示する
-4. The Solver shall 速度場・圧力場のコンター表示を行う
-5. Where ベクトル表示が有効化された場合, the Solver shall ベクトル表示を行う（オプション）
-6. The Solver shall 可視化結果を画像ファイル（PNG等）として出力する
-7. Where テキスト出力が指定された場合, the Solver shall 断面データをテキストファイル（数値）として出力する
+3. The Solver shall 可視化処理を倍精度データのまま実行する
+4. The Solver shall 任意断面（XY, YZ, XZ平面）を抽出・表示する
+5. The Solver shall 速度場・圧力場のコンター表示を行う
+6. Where ベクトル表示が有効化された場合, the Solver shall ベクトル表示を行う（オプション）
+7. The Solver shall 可視化結果を画像ファイル（PNG等）として出力する
+8. Where テキスト出力が指定された場合, the Solver shall 断面データをテキストファイル（数値）として出力する
 
 #### 可視化パラメータ（Visualizationセクション）
 
@@ -914,7 +950,7 @@ The Solver shall Juliaで実装される
 The Solver shall 将来の分散並列計算への拡張性を考慮したHALO領域設計を持つ
 
 ### NFR-4: 並列化方針
-The Solver shall 最初は逐次計算で開発し、後にスレッド並列化を実施する
+The Solver shall 最初は逐次計算で開発し、後にfloopsによるスレッド並列化を実施する
 
 ### NFR-3: モジュール性
 The Solver shall スキーム・ソルバーをモジュール化し差替え可能とする
@@ -946,7 +982,7 @@ The Solver shall Project.tomlとManifest.tomlによりJulia実行環境を管理
 | チェックポイント   | バイナリ、倍精度（リスタート用）   |
 | バイナリエンディアン | リトルエンディアン                 |
 | 可視化精度         | 倍精度（内部データをそのまま使用） |
-| 可視化ライブラリ   | 後日選定                           |
+| 可視化ライブラリ   | CairoMakie                  |
 
 ---
 
@@ -955,8 +991,8 @@ The Solver shall Project.tomlとManifest.tomlによりJulia実行環境を管理
 参考実装: `/Users/Daily/Development/H2/src/`
 
 ### 格子・配列構造
-- 境界セル付き配列: `(MX, MY, MZ) = (NX+2, NY+2, NZ+2)`
-- ゴーストセル: インデックス1と最大値、物理領域は2〜size-1
+- 境界セル付き配列: `(MX, MY, MZ) = (NX+4, NY+4, NZ+4)`
+- ゴーストセル: インデックス1,2とsize、size−1。物理領域は3〜size-2
 - Z方向非一様格子: 面座標(Z)、セル中心(ZC)、セル幅(ΔZ)を別配列で管理
 
 ### データ構造パターン
