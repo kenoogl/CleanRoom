@@ -21,7 +21,7 @@ InputReaderとBoundaryConditionsを新仕様スキーマに対応させる
 - [x] 1.9: JSON全体のキーワード小文字正規化（start/dry_run/Time_Integration_Scheme/Poisson/on_divergence等、BC以外も対象）
 - [x] 1.10: Inflow/Opening/SlidingWallの速度は一様固定（時間依存・分布プロファイル非対応）であることを明記・実装
 - [x] 1.11: ExternalBCでOpeningを許可しない旨を設計書に明記（設計書反映）
-- [ ] 1.12: external_boundariesは`velocity.type/value`形式のみ許可し、文字列省略形はエラーとする
+- [x] 1.12: external_boundariesは`velocity.type/value`形式のみ許可し、文字列省略形はエラーとする
 
 ---
 
