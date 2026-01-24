@@ -63,7 +63,7 @@ function Visualization.render_slice(
     var_mag = sqrt.(var_u.^2 .+ var_v.^2 .+ var_w.^2)
     
     nplots = length(plot_vars)
-    fig = Figure(size = (600 * nplots, 600))
+    fig = Figure(size = (500 * nplots, 500))
     
     # Plot Logic based on plane
     if config.plane == :xy
@@ -89,9 +89,9 @@ function Visualization.render_slice(
         
         for (col, vname) in enumerate(plot_vars)
             if vname == :velocity
-                ax = Axis(fig[1, col], title = "Velocity Magnitude at Z=$(round(Z_val, digits=3)) m", xlabel="X [m]", ylabel="Y [m]", aspect=DataAspect())
+                ax = Axis(fig[1, 2*col-1], title = "Velocity Mag. Z=$(round(Z_val, digits=3))m", xlabel="X [m]", ylabel="Y [m]")
                 hm = heatmap!(ax, X, Y, data_mag, colormap = :viridis)
-                Colorbar(fig[2, col], hm, label = "Velocity [m/s]")
+                Colorbar(fig[1, 2*col], hm, label = "Vel [m/s]")
                 
                 if config.vector_enabled
                     skip = config.vector_skip
@@ -99,9 +99,10 @@ function Visualization.render_slice(
                               tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
                 end
             elseif vname == :pressure
-                ax = Axis(fig[1, col], title = "Pressure at Z=$(round(Z_val, digits=3)) m", xlabel="X [m]", ylabel="Y [m]", aspect=DataAspect())
+                ax = Axis(fig[1, 2*col-1], title = "Pressure Z=$(round(Z_val, digits=3))m", xlabel="X [m]", ylabel="Y [m]")
                 hm = heatmap!(ax, X, Y, data_p, colormap = :plasma)
-                Colorbar(fig[2, col], hm, label = "Pressure [Pa]")
+                contour!(ax, X, Y, data_p, color = :black, linewidth = 0.5, alpha = 0.5)
+                Colorbar(fig[1, 2*col], hm, label = "P [Pa]")
             end
         end
         
@@ -123,9 +124,9 @@ function Visualization.render_slice(
         
         for (col, vname) in enumerate(plot_vars)
             if vname == :velocity
-                ax = Axis(fig[1, col], title = "Velocity Magnitude at Y=$(round(Y_val, digits=3)) m", xlabel="X [m]", ylabel="Z [m]", aspect=DataAspect())
+                ax = Axis(fig[1, 2*col-1], title = "Velocity Mag. Y=$(round(Y_val, digits=3))m", xlabel="X [m]", ylabel="Z [m]")
                 hm = heatmap!(ax, X, Z, data_mag, colormap = :viridis)
-                Colorbar(fig[2, col], hm, label = "Velocity [m/s]")
+                Colorbar(fig[1, 2*col], hm, label = "Vel [m/s]")
                 
                 if config.vector_enabled
                     skip = config.vector_skip
@@ -133,9 +134,10 @@ function Visualization.render_slice(
                               tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
                 end
             elseif vname == :pressure
-                ax = Axis(fig[1, col], title = "Pressure at Y=$(round(Y_val, digits=3)) m", xlabel="X [m]", ylabel="Z [m]", aspect=DataAspect())
+                ax = Axis(fig[1, 2*col-1], title = "Pressure Y=$(round(Y_val, digits=3))m", xlabel="X [m]", ylabel="Z [m]")
                 hm = heatmap!(ax, X, Z, data_p, colormap = :plasma)
-                Colorbar(fig[2, col], hm, label = "Pressure [Pa]")
+                contour!(ax, X, Z, data_p, color = :black, linewidth = 0.5, alpha = 0.5)
+                Colorbar(fig[1, 2*col], hm, label = "P [Pa]")
             end
         end
         
@@ -157,9 +159,9 @@ function Visualization.render_slice(
         
         for (col, vname) in enumerate(plot_vars)
             if vname == :velocity
-                ax = Axis(fig[1, col], title = "Velocity Magnitude at X=$(round(X_val, digits=3)) m", xlabel="Y [m]", ylabel="Z [m]", aspect=DataAspect())
+                ax = Axis(fig[1, 2*col-1], title = "Velocity Mag. X=$(round(X_val, digits=3))m", xlabel="Y [m]", ylabel="Z [m]")
                 hm = heatmap!(ax, Y, Z, data_mag, colormap = :viridis)
-                Colorbar(fig[2, col], hm, label = "Velocity [m/s]")
+                Colorbar(fig[1, 2*col], hm, label = "Vel [m/s]")
                 
                 if config.vector_enabled
                     skip = config.vector_skip
@@ -167,9 +169,10 @@ function Visualization.render_slice(
                               tipwidth=7.5, tiplength=7.5, lengthscale=0.05 / U0, color=:white)
                 end
             elseif vname == :pressure
-                ax = Axis(fig[1, col], title = "Pressure at X=$(round(X_val, digits=3)) m", xlabel="Y [m]", ylabel="Z [m]", aspect=DataAspect())
+                ax = Axis(fig[1, 2*col-1], title = "Pressure X=$(round(X_val, digits=3))m", xlabel="Y [m]", ylabel="Z [m]")
                 hm = heatmap!(ax, Y, Z, data_p, colormap = :plasma)
-                Colorbar(fig[2, col], hm, label = "Pressure [Pa]")
+                contour!(ax, Y, Z, data_p, color = :black, linewidth = 0.5, alpha = 0.5)
+                Colorbar(fig[1, 2*col], hm, label = "P [Pa]")
             end
         end
     end
