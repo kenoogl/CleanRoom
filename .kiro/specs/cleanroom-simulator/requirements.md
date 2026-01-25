@@ -311,7 +311,7 @@ $$
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
 5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
 6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 4 sweep）を適用する
-7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算する（圧力境界条件の定数不定性によるドリフト防止）
+7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算した後、マスクにより物体セル圧力を0に戻す（圧力境界条件の定数不定性によるドリフト防止）
 8. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
 9. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
 10. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor）を選択できる（noneは前処理なし）
@@ -323,11 +323,11 @@ $$
 これを防ぐため、境界条件の種類に関わらず、各ステップで必ず以下の処理を行う：
 
 ```
-p_avg = (1/N) Σ p_i      # 流体セルの空間平均
-p_i = p_i - p_avg        # 全流体セルから平均値を減算
+p_avg = (1/N) Σ (m_i * p_i)   # 流体セルの空間平均（m_i=mask）
+p_i = m_i * (p_i - p_avg)     # 全セルに適用（物体セルは0へ戻る）
 ```
 
-※ 物体セル（mask=0）は平均値計算から除外する
+※ 物体セル（mask=0）は平均値計算から除外され、引き戻し後は0に戻る
 ※ Outflow境界であっても、圧力境界としてはNeumannとして扱うため、この処理は必須である
 
 #### 残差定義
@@ -498,7 +498,7 @@ w[1, j, k] = w[4, j, k]
 5. When 基本形状が定義された時, the Solver shall 形状内部に含まれるセルを物体セル（マスク値=0）として設定する
 6. The Solver shall 任意の数の物体を配置できる
 7. The Solver shall 物体内部の速度を指定速度Vsに設定する（デフォルト: [0.0, 0.0, 0.0]）
-8. The Solver shall 物体内部の圧力をポアソン方程式により計算する（セルフェイス値から自然に決定）
+8. The Solver shall 物体内部の圧力は平均値引き戻し後にマスクで0に固定する（可視化時の外れ値抑制）
 
 #### Geometry JSON仕様
 

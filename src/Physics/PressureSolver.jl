@@ -83,11 +83,9 @@ function solve_poisson!(
         count += mask[i, j, k]
     end
     
-    if count > 0
-        avg_p = sum_p / count
-        @inbounds for k in 1:mz, j in 1:my, i in 1:mx
-            p[i, j, k] -= avg_p
-        end
+    avg_p = sum_p / count
+    @inbounds for k in 1:mz, j in 1:my, i in 1:mx
+        p[i, j, k] = mask[i, j, k] * (p[i, j, k] - avg_p)
     end
 
     if !converged && config.on_divergence == WarnContinue
