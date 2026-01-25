@@ -39,7 +39,7 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
   Internal Boundaries:   0
 
 --- Poisson Solver ---
-  Solver:                CG
+  Solver:                BiCGSTAB
   Preconditioner:        PrecondNone
   Convergence Criteria:       1.0e-03
   Max Iterations:                1000
