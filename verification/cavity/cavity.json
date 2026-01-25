@@ -47,8 +47,8 @@
     "text_output": false
   },
   "Poisson_parameter": {
-    "solver": "CG",
-    "coef_acceleration": 1.2,
+    "solver": "bicgstab",
+    "coef_acceleration": 1.0,
     "convergence_criteria": 0.001,
     "Iteration_max": 1000,
     "on_divergence": "Abort",
