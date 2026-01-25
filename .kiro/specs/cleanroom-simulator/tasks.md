@@ -122,16 +122,18 @@ Start_time_for_averaging以降のWelford法による時間平均と出力
 
 ---
 
-## Task 10: 可視化機能の拡充
+## Task 10: 可視化の外部化
 **Requirements**: 12.1-12.8
 
-velocity/pressure選択、ベクトル表示、テキスト出力の対応
+内蔵可視化を廃止し、外部ツールに移行する
 
-- [x] 10.1: variables指定（velocity/pressure）に基づくコンター描画を実装
-- [x] 10.2: vector_enabled時のベクトル矢印表示を実装
-- [x] 10.3: text_output時の断面テキストファイル出力を実装
-- [x] 10.4: 断面出力は有次元量で出力する
-- [x] 10.5: 内蔵可視化は汎用断面に限定し、問題特化はツールに分離する
+- [x] 10.1: 内蔵可視化コード（Visualization.jl / Extension / 呼び出し）を削除
+- [x] 10.2: ソルバーJSONからVisualizationブロックを削除し、存在時は警告する
+- [x] 10.3: 可視化設定JSONを用いた実行経路（dispatcher / 各ツール）を追加
+- [x] 10.4: 旧内蔵断面可視化を `visualize_cavity.jl` の slice モードへ移植
+- [x] 10.5: ツールREADMEを更新し、JSON設定例を追加
+- [x] 10.6: 可視化出力先をJSONのoutput_dirで制御（options.output_dir優先）
+- [x] 10.7: cavityのslice実行時に中心線プロファイルをoutput_dirへ出力
 
 ---
 
@@ -274,7 +276,7 @@ Outflow境界での逆流時にフラックスをゼロクリップ
 8. Task 8: SPH/Checkpointフォーマット
 9. Task 12: WENO3右側再構成
 10. Task 9: 時間平均
-11. Task 10: 可視化（内蔵）
+11. Task 10: 可視化（外部化）
 12. Task 21: 可視化ツール整理
 13. Task 11: 安定条件監視
 14. Task 13: condition.txt

@@ -762,17 +762,6 @@ mean_new = mean_old + (x - mean_old) / n
     "averaged_file": 4000,                // 平均値ファイル出力間隔[step]
     "checkpoint": 10000                   // チェックポイント出力間隔[step]
   },
-  "Visualization": {
-    "interval": 1000,                     // 可視化出力間隔[step]
-    "plane": "xy",                        // (xy | xz | yz) 可視化断面
-    "plane_index": 15,                    // 断面インデックス（指定軸に垂直な断面位置、1オリジン）
-    "variables": ["velocity", "pressure"], // 可視化対象変数
-    "output_format": "png",               // (png | svg) 出力画像形式
-    "output_dir": "viz",                  // 出力ディレクトリ（output配下）
-    "vector_enabled": false,              // ベクトル矢印表示
-    "vector_skip": 1,                     // ベクトル間引き数
-    "text_output": false                  // 断面テキスト出力
-  },
   "Poisson_parameter": {
     "solver": "RedBlackSOR",              // (RedBlackSOR | CG | BiCGSTAB) ソルバー種別
     "coef_acceleration": 0.9,             // RedBlackSOR加速係数（RedBlackSOR時のみ有効）
@@ -794,6 +783,7 @@ mean_new = mean_old + (x - mean_old) / n
 ```
 
 ※ JSON内のキーワード（例: `Euler`, `RK2`, `RK4`, `yes/no` など）は大文字小文字が混在するため、**パース時に小文字へ正規化して照合する**。
+※ 可視化設定（Visualization）はソルバーJSONから除外し、外部可視化設定JSONへ移行する。
 ※ 圧力初期値はJSONで指定しない。指定がなければ **p=0** を初期値とする。
 
 #### 時間刻みと安定条件
@@ -810,7 +800,8 @@ mean_new = mean_old + (x - mean_old) / n
 - 拡散数は各方向で評価する：Dx = ν*·Δt*/Δx*_min², Dy = ν*·Δt*/Δy*_min², Dz = ν*·Δt*/Δz*_min²
 - D = max(Dx, Dy, Dz) とし、D < 0.5 を満たすことを確認
 - If 拡散数条件を満たさない場合, then 警告を表示し計算を停止する（dry_run時は警告のみ）
-- 計算中も各ステップでCFL/拡散数を監視し、条件違反時は警告を出して停止する
+- 計算中も各ステップでCFL/拡散数を監視する
+  - CFL > 1.0 は安定条件違反として停止（dry_run時は警告のみ）
 
 | 条件 | 式 | 用途 |
 | ---- | -- | ---- |
@@ -907,32 +898,87 @@ dry_run有効時に以下を実行する：
 ※ 現時点で扱うのは速度境界のみ。将来的に pressure / temperature などのサブ属性を追加できる設計とする（同じレベルに追加予定）。
 
 
-### Requirement 12: 可視化機能
-**Objective:** As a シミュレーションエンジニア, I want 計算結果を可視化できる, so that 流れ場を確認・解析できる
+### Requirement 12: 可視化ツール（外部化）
+**Objective:** As a シミュレーションエンジニア, I want 計算結果を外部ツールで可視化できる, so that 流れ場を確認・解析できる
 
 #### Acceptance Criteria
-1. The Solver shall Julia内で可視化機能を実装する（CairoMakieを使用）
-2. The Solver shall Package Extensions機能を用いてCairoMakieへの依存を管理し、非可視化実行時のロード時間を最小化する
-3. The Solver shall 可視化処理を倍精度データのまま実行する
-4. The Solver shall 任意断面（XY, YZ, XZ平面）を抽出・表示する
-5. The Solver shall 速度場・圧力場のコンター表示を行う
-6. Where ベクトル表示が有効化された場合, the Solver shall ベクトル表示を行う（オプション）
-7. The Solver shall 可視化結果を画像ファイル（PNG等）として出力する
-8. Where テキスト出力が指定された場合, the Solver shall 断面データをテキストファイル（数値）として出力する
+1. The Solver shall 可視化を行わず、速度/圧力SPHを出力する
+2. The Project shall 外部可視化ツール（`tools/visualize_*.jl`）を提供する（CairoMakie使用）
+3. The Tools shall 可視化設定JSON（ソルバーJSONとは別）を読み込める
+4. The Tools shall 任意断面（XY, YZ, XZ平面）を抽出・表示できる（外部ツール）
+5. The Tools shall 速度場・圧力場のコンター表示を行う（外部ツール）
+6. Where ベクトル表示が有効化された場合, the Tools shall ベクトル表示を行う（オプション）
+7. The Tools shall 可視化結果を画像ファイル（PNG等）として出力する
+8. Where テキスト出力が指定された場合, the Tools shall 断面データをテキストファイル（数値）として出力する
+9. Where 出力先が指定された場合, the Tools shall 指定ディレクトリへ可視化結果を出力する
 
-#### 可視化パラメータ（Visualizationセクション）
+#### 可視化設定JSON（外部ツール用）
 
 | パラメータ | 型 | 説明 |
 | ---------- | -- | ---- |
-| interval | Int | 可視化出力間隔[step] |
+| tool | String | 使用する可視化ツール（cavity / backward_step など） |
+| mode | String | 可視化モード（例: profile / slice） |
+| input | Object | 入力SPH（vel/prs または prefix+step範囲） |
+| options | Object | ツール固有オプション（例: vecscale, vecref） |
+| Visualization | Object | 断面可視化設定（旧Visualizationブロックを移植） |
+
+**options（ツール共通）**
+
+| パラメータ | 型 | 説明 |
+| ---------- | -- | ---- |
+| vecscale | Float | ベクトル矢印のスケール |
+| vecref | Float | スケール矢印に表示する基準速度 |
+| output_dir | String | 画像/テキスト出力先（`Visualization.output_dir` より優先） |
+
+**inputの指定方法**
+
+| パラメータ | 型 | 説明 |
+| ---------- | -- | ---- |
+| vel | String / Array[String] | 速度SPHの単一ファイルまたは明示リスト |
+| prs | String / Array[String] | 圧力SPHの単一ファイルまたは明示リスト（省略時はvelから推論） |
+| prefix | String | 連番用のprefix（例: `output/vel`） |
+| step_start | Int | 連番開始ステップ |
+| step_end | Int | 連番終了ステップ |
+
+**ルール**
+- `vel/prs` 指定と `prefix+range` は併用不可
+- `vel` と `prs` を配列指定する場合は長さを一致させる
+- `prs` 未指定時は `vel` を `prs` に置換して推論する
+- 相対パスは可視化設定JSONのあるディレクトリ基準で解釈する
+
+#### Visualizationブロック（sliceモード用）
+
+| パラメータ | 型 | 説明 |
+| ---------- | -- | ---- |
 | plane | String | 可視化断面（xy, xz, yz） |
 | plane_index | Int | 断面インデックス（指定軸に垂直な断面位置、1オリジン） |
 | variables | Array[String] | 可視化対象変数（velocity, pressure） |
-| output_format | String | 出力画像形式（png, svg） |
-| output_dir | String | 出力ディレクトリ（output配下） |
+| output_format | String | 出力画像形式（png, svg, none） |
+| output_dir | String | 出力ディレクトリ（スライス出力/プロファイル出力も含む） |
 | vector_enabled | Bool | ベクトル矢印表示の有効化 |
 | vector_skip | Int | ベクトル間引き数 |
 | text_output | Bool | 断面テキスト出力の有効化 |
+
+**例（可視化設定JSON）**
+```json
+{
+  "tool": "cavity",
+  "mode": "slice",
+  "input": {
+    "vel": "verification/cavity/output/vel_0002000.sph"
+  },
+  "Visualization": {
+    "plane": "xz",
+    "plane_index": 16,
+    "variables": ["velocity", "pressure"],
+    "output_format": "png",
+    "output_dir": "viz",
+    "vector_enabled": true,
+    "vector_skip": 2,
+    "text_output": false
+  }
+}
+```
 
 #### 可視化出力形式
 

@@ -12,7 +12,6 @@ include("Physics/Diffusion.jl")
 include("Physics/Convection.jl")
 include("Physics/FractionalStep.jl")
 include("TimeIntegration.jl") 
-include("IO/Visualization.jl")
 include("IO/Checkpoint.jl")
 include("IO/SPHWriter.jl")
 include("IO/InputReader.jl")
@@ -30,7 +29,6 @@ using .Diffusion
 using .Convection
 using .FractionalStep
 using .TimeIntegration
-using .Visualization
 using .Monitor
 using .Checkpoint
 using .SPHWriter
@@ -207,7 +205,7 @@ function run_simulation(param_file::String)
             dx_min = min(dx_min, minimum(grid.dz))
         end
         diff_num = nu_lam * dt_fixed / (dx_min^2)
-        if cfl > sim_params.courant_number || diff_num >= 0.5
+        if cfl > 1.0 || diff_num >= 0.5
             println("Stability violation: CFL=$cfl, D=$diff_num")
             if !sim_params.dry_run
                 break
@@ -264,28 +262,6 @@ function run_simulation(param_file::String)
         if sim_params.intervals.checkpoint > 0 && step % sim_params.intervals.checkpoint == 0
             fname = generate_checkpoint_filename(step)
             write_checkpoint(joinpath(out_dir, fname), buffers, grid, step, time, dim_params)
-        end
-        
-        if sim_params.visualization.interval > 0 && step % sim_params.visualization.interval == 0
-             # Create absolute path for visualization output
-             viz_config = sim_params.visualization
-             abs_viz_dir = joinpath(out_dir, viz_config.output_dir)
-             
-             # Create a modified config pointing to absolute directory
-             # Since VizConfig is a struct, we create a new one with the updated path
-             new_viz_config = VizConfig(
-                 viz_config.interval,
-                 viz_config.plane,
-                 viz_config.plane_index,
-                 viz_config.variables,
-                 viz_config.output_format,
-                 abs_viz_dir,
-                 viz_config.vector_enabled,
-                 viz_config.vector_skip,
-                 viz_config.text_output
-             )
-             
-             render_slice(buffers, grid, new_viz_config, step, dim_params)
         end
         
     end

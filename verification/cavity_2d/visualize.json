@@ -1,0 +1,17 @@
+{
+  "tool": "cavity",
+  "mode": "slice",
+  "input": {
+    "vel": "verification/cavity_2d/output/vel_0002000.sph"
+  },
+  "Visualization": {
+    "plane": "xz",
+    "plane_index": 4,
+    "variables": ["velocity", "pressure"],
+    "output_format": "png",
+    "output_dir": "viz",
+    "vector_enabled": true,
+    "vector_skip": 2,
+    "text_output": false
+  }
+}

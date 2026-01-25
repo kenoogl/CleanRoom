@@ -1,0 +1,22 @@
+{
+  "tool": "cavity",
+  "mode": "slice",
+  "input": {
+    "prefix": "output/vel",
+    "step_start": 100,
+    "step_end": 1000
+  },
+  "Visualization": {
+    "plane": "xz",
+    "plane_index": 16,
+    "variables": [
+      "velocity",
+      "pressure"
+    ],
+    "output_format": "png",
+    "output_dir": "viz",
+    "vector_enabled": true,
+    "vector_skip": 2,
+    "text_output": false
+  }
+}

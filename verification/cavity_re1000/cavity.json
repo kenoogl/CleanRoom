@@ -32,20 +32,6 @@
     "averaged_file": 1000,
     "checkpoint": 800
   },
-  "Visualization": {
-    "interval": 200,
-    "plane": "xz",
-    "plane_index": 16,
-    "variables": [
-      "velocity",
-      "pressure"
-    ],
-    "output_format": "png",
-    "output_dir": "viz",
-    "vector_enabled": true,
-    "vector_skip": 2,
-    "text_output": false
-  },
   "Poisson_parameter": {
     "solver": "RedBlackSOR",
     "coef_acceleration": 1.7,
@@ -62,8 +48,7 @@
       0.0,
       0.0,
       0.0
-    ],
-    "pressure": 0.0
+    ]
   },
   "Restart": {
     "file": ""

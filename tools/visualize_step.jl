@@ -1,5 +1,6 @@
 #!/usr/bin/env julia
 using CairoMakie
+using JSON3
 
 include("sph_reader.jl")
 
@@ -137,16 +138,18 @@ function plot_step_pressure(vd, pd; output_path=nothing)
 end
 
 """
-    process_file(vel_path; vector_scale=vector_scale)
+    process_file(vel_path; vector_scale=vector_scale, output_dir=nothing)
 
 Process a single velocity file (and corresponding pressure file).
 """
-function process_file(vel_path::String; vector_scale=0.05, vector_ref=nothing)
+function process_file(vel_path::String; vector_scale=0.05, vector_ref=nothing, output_dir::Union{Nothing,String}=nothing)
     println("Processing: $vel_path")
     
     # Infer pressure file path
     # Assume naming convention: vel_XXXXXXX.sph -> prs_XXXXXXX.sph
     dir = dirname(vel_path)
+    out_dir = isnothing(output_dir) ? dir : output_dir
+    mkpath(out_dir)
     base = basename(vel_path)
     
     # Replace "vel" with "prs" in the filename
@@ -181,11 +184,11 @@ function process_file(vel_path::String; vector_scale=0.05, vector_ref=nothing)
     step_match = match(r"vel_(\d+)\.sph$", base)
     if step_match !== nothing
         step_tag = step_match.captures[1]
-        vel_out = joinpath(dir, "velocity_$(step_tag).png")
-        prs_out = joinpath(dir, "pressure_$(step_tag).png")
+        vel_out = joinpath(out_dir, "velocity_$(step_tag).png")
+        prs_out = joinpath(out_dir, "pressure_$(step_tag).png")
     else
-        vel_out = joinpath(dir, replace(base, ".sph" => "_velocity.png"))
-        prs_out = joinpath(dir, replace(base, ".sph" => "_pressure.png"))
+        vel_out = joinpath(out_dir, replace(base, ".sph" => "_velocity.png"))
+        prs_out = joinpath(out_dir, replace(base, ".sph" => "_pressure.png"))
     end
 
     plot_step_velocity(vd, output_path=vel_out, vector_scale=vector_scale, vector_ref=vector_ref)
@@ -197,7 +200,7 @@ end
 
 Process a range of steps.
 """
-function process_range(prefix::String, step_start::Int, step_end::Int; vector_scale=0.05, vector_ref=nothing)
+function process_range(prefix::String, step_start::Int, step_end::Int; vector_scale=0.05, vector_ref=nothing, output_dir::Union{Nothing,String}=nothing)
     for step in step_start:step_end
         # Construct filename. Prefix is likely "verification/backward_step/output/vel"
         # We need to append "_XXXXXXX.sph"
@@ -207,7 +210,7 @@ function process_range(prefix::String, step_start::Int, step_end::Int; vector_sc
         
         fname = "$(prefix)_$(lpad(step, 7, '0')).sph"
         if isfile(fname)
-            process_file(fname; vector_scale=vector_scale, vector_ref=vector_ref)
+            process_file(fname; vector_scale=vector_scale, vector_ref=vector_ref, output_dir=output_dir)
         end
     end
 end
@@ -247,6 +250,41 @@ function parse_vector_scale(args::Vector{String})
     return vector_scale, vector_ref, filtered
 end
 
+function run_from_config(path::String)
+    if !isfile(path)
+        error("Config file not found: $(path)")
+    end
+    data = JSON3.read(read(path, String))
+    input = get(data, :input, nothing)
+    if isnothing(input)
+        error("Config must include input")
+    end
+    config_dir = dirname(path)
+    resolve_path(p::String) = isabspath(p) ? p : joinpath(config_dir, p)
+    options = get(data, :options, nothing)
+    vecscale = isnothing(options) ? 0.05 : Float64(get(options, :vecscale, 0.05))
+    vecref = isnothing(options) ? nothing : (haskey(options, :vecref) ? Float64(options.vecref) : nothing)
+    viz = haskey(data, :Visualization) ? data.Visualization : get(data, :visualization, nothing)
+    outdir_opt = if !isnothing(options) && haskey(options, :output_dir)
+        String(options.output_dir)
+    elseif !isnothing(viz) && haskey(viz, :output_dir)
+        String(viz.output_dir)
+    else
+        nothing
+    end
+    output_dir = isnothing(outdir_opt) ? nothing : resolve_path(outdir_opt)
+
+    if haskey(input, :vel)
+        process_file(resolve_path(String(input.vel)); vector_scale=vecscale, vector_ref=vecref, output_dir=output_dir)
+        return
+    end
+    if haskey(input, :prefix) && haskey(input, :step_start) && haskey(input, :step_end)
+        process_range(resolve_path(String(input.prefix)), Int(input.step_start), Int(input.step_end); vector_scale=vecscale, vector_ref=vecref, output_dir=output_dir)
+        return
+    end
+    error("Config input must include vel or (prefix, step_start, step_end)")
+end
+
 function main()
     if length(ARGS) < 1
         println("Usage:")
@@ -255,6 +293,7 @@ function main()
         println("  julia visualize_step.jl <vel_file> --vecscale 0.05")
         println("  julia visualize_step.jl <vel_prefix> <step_start> <step_end> --vecscale 0.05")
         println("  julia visualize_step.jl <vel_file> --vecref 5.0")
+        println("  julia visualize_step.jl --config visualize.json")
         println("")
         println("Example:")
         println("  julia visualize_step.jl verification/backward_step/output/vel_0001000.sph")
@@ -262,7 +301,16 @@ function main()
         return
     end
 
-    vector_scale, vector_ref, args = parse_vector_scale(collect(ARGS))
+    args = collect(ARGS)
+    if length(args) >= 2 && args[1] == "--config"
+        run_from_config(args[2])
+        return
+    elseif length(args) >= 1 && startswith(args[1], "--config=")
+        run_from_config(split(args[1], "=", limit=2)[2])
+        return
+    end
+
+    vector_scale, vector_ref, args = parse_vector_scale(args)
 
     if length(args) == 1
         process_file(args[1]; vector_scale=vector_scale, vector_ref=vector_ref)

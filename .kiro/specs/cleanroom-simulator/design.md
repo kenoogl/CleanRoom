@@ -63,7 +63,6 @@ graph TB
         SPHOutput[SPHWriter.jl]
         Checkpoint[Checkpoint.jl]
         Monitor[Monitor.jl]
-        Visualization[Visualization.jl]
     end
 
     subgraph TimeInt["Time Integration"]
@@ -98,45 +97,21 @@ graph TB
 | Parallelization | FLoops.jl | スレッド並列抽象化 | SequentialEx/ThreadedEx切り替え |
 | Linear Algebra | LinearAlgebra.jl | 行列・ベクトル演算 | 標準ライブラリ |
 | JSON Parsing | JSON3.jl | 入力パラメータ読込 | 高性能JSONパーサー |
-| Visualization | CairoMakie.jl | 静的画像出力 | PNG/SVG対応、**weakdep** |
+| Visualization | CairoMakie.jl | 外部可視化ツール | tools/visualize_*.jl で使用 |
 | File I/O | Base.IO | バイナリ入出力 | SPH/チェックポイント |
 | Environment | Project.toml | 依存管理 | Julia標準 |
 
-### Package Extensions構成
+### 外部可視化ツール構成
 
-CairoMakieの初回コンパイル遅延（Time-to-First-Plot問題）を回避するため、Julia 1.9+のPackage Extensions機能を採用する。可視化を行わない計算のみのジョブでは高速に起動できる。
-
-```toml
-# Project.toml
-[deps]
-FLoops = "..."
-JSON3 = "..."
-LinearAlgebra = "..."
-
-[weakdeps]
-CairoMakie = "..."
-
-[extensions]
-CleanroomVisualizationExt = "CairoMakie"
-```
+可視化は外部ツールとして提供し、ソルバー本体には可視化機能を含めない。
 
 ```
 # ディレクトリ構成
-src/
-├── CleanroomSolver.jl      # メインモジュール
-├── Visualization.jl        # 可視化インターフェース（stub）
-└── ...
-ext/
-└── CleanroomVisualizationExt.jl  # CairoMakie依存の実装
 tools/
-├── visualize_cavity.jl     # キャビティ専用可視化ツール
-├── visualize_step.jl       # バックステップ専用可視化ツール
+├── visualize_cavity.jl     # キャビティ可視化（中心線/断面）
+├── visualize_step.jl       # バックステップ可視化
 └── visualize.jl            # パターン適用の統一入口（dispatcher）
 ```
-
-**動作**:
-- `using CairoMakie` なしで `CleanroomSolver` を読み込む場合: Visualization機能は無効（stub関数がエラーを返す）
-- `using CairoMakie, CleanroomSolver` の場合: 拡張モジュールが自動ロードされ、可視化機能が有効化
 
 ---
 
@@ -153,7 +128,6 @@ sequenceDiagram
     participant FracStep as FractionalStep
     participant Pressure as PressureSolver
     participant Output as SPHWriter
-    participant Viz as Visualization
 
     Main->>IO: load_parameters()
     IO-->>Main: params, bc_config
@@ -172,9 +146,6 @@ sequenceDiagram
 
         alt Output Interval
             Main->>Output: write_sph(buffers, step)
-        end
-        alt Visualization Interval
-            Main->>Viz: render_slice(buffers, params)
         end
     end
 ```
@@ -221,7 +192,7 @@ flowchart TB
 | 9.1-9.8 | 物体表現 | Geometry | GeometryInterface | Preprocessing |
 | 10.1 | HALO領域 | Grid, Fields | HALOInterface | Grid Generation |
 | 11.1-11.18 | 入出力 | InputReader, SPHWriter, Checkpoint | IOInterface | IO Operations |
-| 12.1-12.8 | 可視化 | Visualization | VizInterface | Visualization |
+| 12.1-12.8 | 可視化 | Tools (external) | VizToolInterface | Visualization Tools |
 
 ---
 
@@ -246,7 +217,6 @@ flowchart TB
 | SPHWriter | IO | SPHバイナリ出力 | 11 | Common | Service |
 | Checkpoint | IO | チェックポイント入出力 | 11 | Common, Fields | Service |
 | Monitor | IO | 計算モニター・ロギング | 11 | Common | Service |
-| Visualization | IO | 断面可視化 | 12 | CairoMakie | Service |
 
 ---
 
@@ -878,7 +848,8 @@ end
 - RK各ステージの中間ステップ管理を内部に隠蔽
 - Mainドライバは `advance!` のみを呼び出し、スキーム詳細を意識しない
 - Δtは初期化時に一度だけ計算し固定値として保持する（要件準拠）
-- 固定Δt運用でも毎ステップCFL/拡散条件を監視し、違反時は停止（dry_run時は警告）
+- 固定Δt運用でも毎ステップCFL/拡散条件を監視する
+  - CFL > 1.0 は安定条件違反として停止（dry_run時は警告のみ）
 
 **Dependencies**
 - Inbound: Main Driver — ステップ進行呼び出し (P0)
@@ -1286,7 +1257,6 @@ struct SimulationParams
     grid_config::GridConfig
     courant_number::Float64
     intervals::IntervalConfig
-    visualization::VizConfig
     poisson::PoissonConfig
     time_scheme::Symbol   # :Euler, :RK2, :RK4
     smagorinsky_constant::Float64
@@ -1540,100 +1510,35 @@ end
 
 ---
 
-#### Visualization（内蔵・汎用）
+#### Visualization Tools（外部）
 
 | Field | Detail |
 |-------|--------|
-| Intent | 断面可視化と画像出力（汎用） |
-| Requirements | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7 |
-
-**Responsibilities & Constraints**
-- CairoMakieによる静的出力（汎用断面のみ）
-- XY/XZ/YZ断面抽出
-- 速度場・圧力場コンター
-- 有次元量で表示
-- **Package Extensions対応**: CairoMakieは`weakdeps`として定義し、可視化不要時は読み込みをスキップ
-- **問題特化の可視化は内蔵しない**（cavity/backward_step等はツールで提供）
-
-**Dependencies**
-- Inbound: Main Driver — 可視化呼び出し (P0)
-- Outbound: Common, Fields, Grid (P0)
-- External: CairoMakie.jl — **weakdep** (遅延読込)
-
-**Contracts**: Service [x]
-
-##### Service Interface
-
-```julia
-struct VizConfig
-    interval::Int
-    plane::Symbol         # :xy, :xz, :yz
-    plane_index::Int
-    variables::Vector{Symbol}  # [:velocity, :pressure]
-    output_format::Symbol  # :png or :svg
-    output_dir::String    # 出力ディレクトリ
-    # ベクトル表示オプション
-    vector_enabled::Bool  # ベクトル矢印表示の有効化
-    vector_skip::Int      # ベクトル間引き数（1=全セル、2=1セルおき）
-    # テキスト出力オプション
-    text_output::Bool     # テキストファイル出力の有効化
-end
-
-# テキストファイル出力フォーマット
-# 座標 + 物理量、スペース区切り
-# 例: x y z u v w p
-function write_slice_text(
-    filepath::String,
-    buffers::CFDBuffers,
-    grid::GridData,
-    config::VizConfig,
-    dim_params::DimensionParams
-)
-    # 断面データをテキスト形式で出力
-    # フォーマット: x y z u v w p（スペース区切り）
-    # 有次元量に変換して出力
-end
-
-function render_slice(
-    buffers::CFDBuffers,
-    grid::GridData,
-    config::VizConfig,
-    step::Int,
-    dim_params::DimensionParams
-)
-    # 断面抽出 → heatmap/contour → 画像保存
-    # 有次元量に変換して表示
-    # config.output_dir に出力
-    # config.vector_enabled が true ならベクトル矢印を重畳
-    # config.text_output が true ならテキストファイルも出力
-end
-```
-
----
-
-#### Visualization Tools（外部・問題特化）
-
-| Field | Detail |
-|-------|--------|
-| Intent | 問題クラスに特化した可視化をツールとして提供 |
+| Intent | 問題クラスに特化した可視化を外部ツールとして提供 |
 | Requirements | 12.1-12.8（出力はSPHベース、可視化はツール側で自由設計） |
 
 **Responsibilities & Constraints**
-- solver内の可視化は最小限に保ち、詳細な可視化はツールに分離
-- 問題クラスごとに「パターン」を用意し、適用を指示する方式
+- solver内の可視化は行わない
+- 問題クラスごとに「パターン」を用意し、可視化設定JSONで適用を指示
 - ツールはSPH出力を入力とし、解析/可視化の自由度を確保
 - 既存ツール例: `visualize_cavity.jl` / `visualize_step.jl`
-- 統一入口（dispatcher）を提供し、`pattern` 指定で起動可能にする
+- 統一入口（dispatcher）を提供し、`--config` 指定で起動可能にする
+  - `tool`, `mode`, `input`, `Visualization`, `options` を解釈する
+  - `input` は単一ファイル、明示リスト（配列）、prefix+range のいずれかで指定する
+  - `vel/prs` 指定と `prefix+range` は併用不可、`prs` 未指定時は `vel` から推論
+  - 出力先は `options.output_dir` または `Visualization.output_dir` を参照する
 
 **Pattern Examples**
 - `cavity`: 速度SPHから中心線プロファイル（Ghia形式）
 - `backward_step`: 速度ベクトル＋圧力コンター
+- `cavity` の slice モード: 任意断面の速度/圧力コンター（旧内蔵可視化を移植）
 
-**Tool Interface (CLI)**
+**Tool Interface (CLI / JSON)**
 ```
 julia tools/visualize_cavity.jl <sph_file or prefix>
 julia tools/visualize_step.jl   <vel_sph_file or prefix>
 julia tools/visualize.jl <pattern> [args...]
+julia tools/visualize.jl --config visualize.json
 ```
 
 ---
@@ -1647,7 +1552,6 @@ erDiagram
     SimulationParams ||--|| DimensionParams : contains
     SimulationParams ||--|| GridConfig : contains
     SimulationParams ||--|| PoissonConfig : contains
-    SimulationParams ||--|| VizConfig : contains
 
     GridConfig ||--|| GridData : generates
     GridData ||--|| CFDBuffers : sizes

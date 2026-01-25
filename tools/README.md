@@ -1,6 +1,6 @@
 # 可視化ツール一覧（問題クラス別パターン）
 
-内蔵可視化は汎用断面（速度・圧力）に限定し、問題特化の可視化はツールとして提供する。
+内蔵可視化は廃止し、可視化はすべて外部ツールとして提供する。
 
 ## パターン一覧
 
@@ -9,6 +9,8 @@
 - **入力**: 速度SPH（vel_#######.sph）
 - **出力**: 中心線プロファイル図（`*_profile.png`）
 - **ツール**: `tools/visualize_cavity.jl`
+
+補足: `mode: "slice"` の場合でも、断面可視化に加えて中心線プロファイル図も出力する（出力先は `Visualization.output_dir`）。
 
 #### 例
 ```
@@ -21,8 +23,10 @@ julia tools/visualize_cavity.jl verification/cavity/output/vel 1000 2000
 ### backward_step
 - **用途**: バックステップ流れの速度ベクトル＋圧力コンター
 - **入力**: 速度SPH（vel_#######.sph）と圧力SPH（prs_#######.sph）
-- **出力**: 速度ベクトル＋圧力コンター（`*_plot.png`）
+- **出力**: 速度ベクトル（`velocity_#######.png`）＋圧力コンター（`pressure_#######.png`）
 - **ツール**: `tools/visualize_step.jl`
+
+補足: 出力先を `viz` にしたい場合は `options.output_dir` または `Visualization.output_dir` を指定する。
 
 #### 例
 ```
@@ -41,7 +45,84 @@ julia tools/visualize.jl cavity verification/cavity/output/vel_0001000.sph
 julia tools/visualize.jl cavity verification/cavity/output/vel 1000 2000
 julia tools/visualize.jl backward_step verification/backward_step/output/vel_0001000.sph
 julia tools/visualize.jl backward_step verification/backward_step/output/vel 1000 2000
+julia tools/visualize.jl --config verification/backward_step/visualize.json
 ```
+
+---
+
+## JSON設定ファイル（推奨）
+
+可視化用JSONを用意し、`--config` で実行する。
+
+```json
+{
+  "tool": "backward_step",
+  "input": {
+    "vel": "verification/backward_step/output/vel_0001000.sph"
+  },
+  "options": {
+    "vecscale": 0.02,
+    "vecref": 5.0
+  }
+}
+```
+
+**実行コマンド**
+```
+julia tools/visualize.jl --config verification/cavity/visualize.json
+julia tools/visualize.jl --config verification/backward_step/visualize.json
+```
+
+**ツールを直接起動する場合**
+```
+# cavity（単一ファイル）
+julia tools/visualize_cavity.jl verification/cavity/output/vel_0002000.sph
+
+# cavity（連番）
+julia tools/visualize_cavity.jl verification/cavity/output/vel 100 1000
+
+# backward_step（単一ファイル）
+julia tools/visualize_step.jl verification/backward_step/output/vel_0001000.sph
+
+# backward_step（連番）
+julia tools/visualize_step.jl verification/backward_step/output/vel 100 1000
+```
+
+**dispatcher でパターン指定**
+```
+julia tools/visualize.jl cavity verification/cavity/output/vel_0002000.sph
+julia tools/visualize.jl backward_step verification/backward_step/output/vel_0001000.sph
+```
+
+### input の指定方法
+
+`input` は次のいずれかで指定する。
+
+1) **単一ファイル**
+```json
+{ "input": { "vel": "output/vel_0000100.sph" } }
+```
+
+2) **連番（prefix+range）**
+```json
+{ "input": { "prefix": "output/vel", "step_start": 100, "step_end": 1000 } }
+```
+
+3) **明示リスト（複数ファイル）**
+```json
+{
+  "input": {
+    "vel": ["output/vel_0000100.sph", "output/vel_0000500.sph"],
+    "prs": ["output/prs_0000100.sph", "output/prs_0000500.sph"]
+  }
+}
+```
+
+**ルール**
+- `vel` の配列長と `prs` の配列長は一致させる
+- `vel/prs` 指定と `prefix+range` は併用不可
+- `prs` 未指定時は `vel` を `prs` に置換して推論する
+- 相対パスはJSONファイルのあるディレクトリ基準で解釈する
 
 ---
 

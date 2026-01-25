@@ -7,7 +7,6 @@ using ..Fields: estimate_memory_size
 using ..TimeIntegration
 using ..BoundaryConditions: Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow, Opening, OpeningFlowType, OpeningInlet, OpeningOutlet, ExternalBC, InternalBoundary, BoundaryConditionSet
 using ..PressureSolver
-using ..Visualization
 
 export IntervalConfig, InitialCondition, SimulationParams
 export load_parameters, load_boundary_conditions
@@ -49,7 +48,6 @@ struct SimulationParams
     grid_config::GridConfig
     courant_number::Float64
     intervals::IntervalConfig
-    visualization::VizConfig
     poisson::PoissonConfig
     time_scheme::Symbol   # :Euler, :RK2, :RK4
     smagorinsky_constant::Float64
@@ -197,21 +195,8 @@ function load_parameters(filepath::String)::SimulationParams
     )
 
     # --- Visualization ---
-    viz = get(data, :Visualization, nothing)
-    viz_config = if isnothing(viz)
-        VizConfig(0, :none, 0, [], :none, "", false, 1, false)
-    else
-        VizConfig(
-            Int(get(viz, :interval, 0)),
-            Symbol(lowercase(String(get(viz, :plane, "xy")))),
-            Int(get(viz, :plane_index, 1)),
-            [Symbol(lowercase(String(v))) for v in get(viz, :variables, ["velocity", "pressure"])],
-            Symbol(lowercase(String(get(viz, :output_format, "png")))),
-            String(get(viz, :output_dir, "viz")),
-            Bool(get(viz, :vector_enabled, false)),
-            Int(get(viz, :vector_skip, 1)),
-            Bool(get(viz, :text_output, false))
-        )
+    if haskey(data, :Visualization)
+        @warn "Visualization section is deprecated in solver JSON; use external visualization config instead."
     end
 
     # --- Poisson ---
@@ -270,7 +255,7 @@ function load_parameters(filepath::String)::SimulationParams
     return SimulationParams(
         dry_run, start_mode, max_step, dim_params,
         grid_config, courant_number, intervals,
-        viz_config, poisson_config, time_scheme,
+        poisson_config, time_scheme,
         smagorinsky_constant, div_max_threshold,
         initial_condition, restart_file
     )
