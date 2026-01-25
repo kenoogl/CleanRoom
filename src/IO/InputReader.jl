@@ -246,6 +246,9 @@ function load_parameters(filepath::String)::SimulationParams
     initial_condition = if isnothing(ic)
         InitialCondition((0.0, 0.0, 0.0), 0.0)
     else
+        if haskey(ic, :pressure)
+            @warn "Initial_Condition.pressure is deprecated; default p=0 is recommended (pressure will be read if specified)."
+        end
         InitialCondition(
             parse_tuple3(get(ic, :velocity, [0.0, 0.0, 0.0])),
             Float64(get(ic, :pressure, 0.0))

@@ -1266,7 +1266,7 @@ end
 # 初期条件設定
 struct InitialCondition
     velocity::NTuple{3, Float64}  # 初期速度ベクトル [m/s]
-    pressure::Float64             # 初期圧力 [Pa]（デフォルト: 0.0）
+    pressure::Float64             # 初期圧力 [Pa]（デフォルト: 0.0 / 通常はJSONで指定しない）
 end
 
 # 内部境界（物体扱い）定義

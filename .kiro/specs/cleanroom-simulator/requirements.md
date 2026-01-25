@@ -785,8 +785,7 @@ mean_new = mean_old + (x - mean_old) / n
   "Time_Integration_Scheme": "Euler",     // (Euler | RK2 | RK4) 時間積分スキーム
   "divMax_threshold": 1.0e-3,             // [-] 発散検出閾値（無次元）
   "Initial_Condition": {
-    "velocity": [0.0, 0.0, 0.0],          // [m/s] 初期速度ベクトル（一様）
-    "pressure": 0.0                        // [Pa] 初期圧力値（一様）
+    "velocity": [0.0, 0.0, 0.0]           // [m/s] 初期速度ベクトル（一様）
   },
   "Restart": {
     "file": "checkpoint_0010000.bin"      // リスタートファイル（start="restart"時に有効）
@@ -795,6 +794,7 @@ mean_new = mean_old + (x - mean_old) / n
 ```
 
 ※ JSON内のキーワード（例: `Euler`, `RK2`, `RK4`, `yes/no` など）は大文字小文字が混在するため、**パース時に小文字へ正規化して照合する**。
+※ 圧力初期値はJSONで指定しない。指定がなければ **p=0** を初期値とする。
 
 #### 時間刻みと安定条件
 
