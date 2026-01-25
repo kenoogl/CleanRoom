@@ -73,10 +73,12 @@ function plot_profiles(data, profiles; output_path=nothing, title_suffix="")
     supertitle = "Cavity Flow (Step $(data.step), t=$(round(data.time, digits=2)))$(title_suffix)"
     Label(fig[0, :], supertitle, fontsize = 20)
     
-    # Left panel: u vs z
+    # Left panel: u vs z (center u-axis at zero)
+    max_u = maximum(abs.(profiles.u_centerline))
+    u_lim = max(max_u * 1.05, 1.0e-6)
     ax1 = Axis(fig[1, 1], xlabel = "u", ylabel = "z", 
                title = "u at x=$(round(profiles.x_val, digits=2))",
-               limits = ((-0.5, 1.2), (0, 1)),
+               limits = ((-u_lim, u_lim), (0, 1)),
                aspect = AxisAspect(1),
                xticklabelpad = 5, yticklabelpad = 5,
                xlabelpadding = 10, ylabelpadding = 10)
@@ -85,10 +87,12 @@ function plot_profiles(data, profiles; output_path=nothing, title_suffix="")
                   label = "Present", color = :blue, markersize = 8)
     axislegend(ax1, position = :rb)
     
-    # Right panel: w vs x
+    # Right panel: w vs x (center w-axis at zero)
+    max_w = maximum(abs.(profiles.w_centerline))
+    w_lim = max(max_w * 1.05, 1.0e-6)
     ax2 = Axis(fig[1, 2], xlabel = "x", ylabel = "w", 
                title = "w at z=$(round(profiles.z_val, digits=2))",
-               limits = ((0, 1), (-0.3, 0.3)),
+               limits = ((0, 1), (-w_lim, w_lim)),
                aspect = AxisAspect(1),
                xticklabelpad = 5, yticklabelpad = 5,
                xlabelpadding = 10, ylabelpadding = 10)

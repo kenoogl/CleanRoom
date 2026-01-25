@@ -128,6 +128,10 @@ src/
 └── ...
 ext/
 └── CleanroomVisualizationExt.jl  # CairoMakie依存の実装
+tools/
+├── visualize_cavity.jl     # キャビティ専用可視化ツール
+├── visualize_step.jl       # バックステップ専用可視化ツール
+└── visualize.jl            # パターン適用の統一入口（dispatcher）
 ```
 
 **動作**:
@@ -1536,19 +1540,20 @@ end
 
 ---
 
-#### Visualization
+#### Visualization（内蔵・汎用）
 
 | Field | Detail |
 |-------|--------|
-| Intent | 断面可視化と画像出力 |
+| Intent | 断面可視化と画像出力（汎用） |
 | Requirements | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7 |
 
 **Responsibilities & Constraints**
-- CairoMakieによる静的出力
+- CairoMakieによる静的出力（汎用断面のみ）
 - XY/XZ/YZ断面抽出
 - 速度場・圧力場コンター
 - 有次元量で表示
 - **Package Extensions対応**: CairoMakieは`weakdeps`として定義し、可視化不要時は読み込みをスキップ
+- **問題特化の可視化は内蔵しない**（cavity/backward_step等はツールで提供）
 
 **Dependencies**
 - Inbound: Main Driver — 可視化呼び出し (P0)
@@ -1602,6 +1607,33 @@ function render_slice(
     # config.vector_enabled が true ならベクトル矢印を重畳
     # config.text_output が true ならテキストファイルも出力
 end
+```
+
+---
+
+#### Visualization Tools（外部・問題特化）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 問題クラスに特化した可視化をツールとして提供 |
+| Requirements | 12.1-12.8（出力はSPHベース、可視化はツール側で自由設計） |
+
+**Responsibilities & Constraints**
+- solver内の可視化は最小限に保ち、詳細な可視化はツールに分離
+- 問題クラスごとに「パターン」を用意し、適用を指示する方式
+- ツールはSPH出力を入力とし、解析/可視化の自由度を確保
+- 既存ツール例: `visualize_cavity.jl` / `visualize_step.jl`
+- 統一入口（dispatcher）を提供し、`pattern` 指定で起動可能にする
+
+**Pattern Examples**
+- `cavity`: 速度SPHから中心線プロファイル（Ghia形式）
+- `backward_step`: 速度ベクトル＋圧力コンター
+
+**Tool Interface (CLI)**
+```
+julia tools/visualize_cavity.jl <sph_file or prefix>
+julia tools/visualize_step.jl   <vel_sph_file or prefix>
+julia tools/visualize.jl <pattern> [args...]
 ```
 
 ---

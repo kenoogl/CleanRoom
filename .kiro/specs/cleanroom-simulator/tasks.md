@@ -131,6 +131,7 @@ velocity/pressure選択、ベクトル表示、テキスト出力の対応
 - [x] 10.2: vector_enabled時のベクトル矢印表示を実装
 - [x] 10.3: text_output時の断面テキストファイル出力を実装
 - [x] 10.4: 断面出力は有次元量で出力する
+- [x] 10.5: 内蔵可視化は汎用断面に限定し、問題特化はツールに分離する
 
 ---
 
@@ -251,6 +252,17 @@ Outflow境界での逆流時にフラックスをゼロクリップ
 
 ---
 
+## Task 21: 可視化ツール整理（問題クラス別パターン）
+**Requirements**: 12.1-12.8
+
+問題クラスごとの可視化ツールを整理し、適用パターンを明確化
+
+- [x] 21.1: cavity/backward_step のツールをパターンとして整理
+- [x] 21.2: パターン適用方法（CLI/引数）をドキュメント化
+- [x] 21.3: 統一入口（dispatcher）を追加し、パターン追加方針を明記
+
+---
+
 ## 優先順位（推奨実行順序）
 1. Task 1: 境界条件JSONスキーマ（最重要、他タスクの基盤）
 2. Task 2: internal_boundariesの物体化
@@ -262,13 +274,14 @@ Outflow境界での逆流時にフラックスをゼロクリップ
 8. Task 8: SPH/Checkpointフォーマット
 9. Task 12: WENO3右側再構成
 10. Task 9: 時間平均
-11. Task 10: 可視化
-12. Task 11: 安定条件監視
-13. Task 13: condition.txt
-14. Task 14: 統合テスト
-15. Task 15: Z方向非等間隔格子
-16. Task 16: SlidingWall境界条件
-17. Task 17: RK2/RK4時間積分
-18. Task 18: dry_runモード
-19. Task 19: history.txt出力拡張
-20. Task 20: 逆流安定化オプション
+11. Task 10: 可視化（内蔵）
+12. Task 21: 可視化ツール整理
+13. Task 11: 安定条件監視
+14. Task 13: condition.txt
+15. Task 14: 統合テスト
+16. Task 15: Z方向非等間隔格子
+17. Task 16: SlidingWall境界条件
+18. Task 17: RK2/RK4時間積分
+19. Task 18: dry_runモード
+20. Task 19: history.txt出力拡張
+21. Task 20: 逆流安定化オプション
