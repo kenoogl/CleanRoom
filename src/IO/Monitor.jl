@@ -129,6 +129,11 @@ function write_condition_file(
 
         println(io, "--- Poisson Solver ---")
         @printf(io, "  %-22s %s\n", "Solver:", sim_params.poisson.solver)
+        if sim_params.poisson.solver == CG || sim_params.poisson.solver == BiCGSTAB
+            @printf(io, "  %-22s %s\n", "Preconditioner:", sim_params.poisson.preconditioner)
+        else
+            @printf(io, "  %-22s %s\n", "Preconditioner:", "N/A")
+        end
         if sim_params.poisson.solver == RedBlackSOR
             @printf(io, "  %-22s %12.4g\n", "SOR Omega:", sim_params.poisson.omega)
         end

@@ -314,6 +314,7 @@ $$
 7. The Solver shall 収束後に常に圧力場の空間平均値を計算し、全セルから平均値を減算する（圧力境界条件の定数不定性によるドリフト防止）
 8. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
 9. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
+10. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor）を選択できる（noneは前処理なし）
 
 #### 圧力平均値の引き戻し
 
@@ -777,7 +778,8 @@ mean_new = mean_old + (x - mean_old) / n
     "coef_acceleration": 0.9,             // RedBlackSOR加速係数（RedBlackSOR時のみ有効）
     "convergence_criteria": 1.0e-3,       // 収束判定値
     "Iteration_max": 100,                 // 最大反復回数
-    "on_divergence": "WarnContinue"       // (WarnContinue | Abort) 収束失敗時の動作
+    "on_divergence": "WarnContinue",      // (WarnContinue | Abort) 収束失敗時の動作
+    "preconditioner": "sor"               // (sor | none) CG/BiCGSTAB時の前処理
   },
   "Start_time_for_averaging": 0.0,        // [sec] 平均化開始時刻
   "Time_Integration_Scheme": "Euler",     // (Euler | RK2 | RK4) 時間積分スキーム

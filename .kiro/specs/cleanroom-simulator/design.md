@@ -703,12 +703,13 @@ end
 - CG/BiCGSTAB（オプション）
 - 反復ループ内での `apply_pressure_bcs!` 呼び出しによる境界条件（Neumann/Periodic等）のリアルタイム更新
 - 真の残差 $|b - Ax|$ に基づく収束判定
-- CG/BiCGSTABは前処理付き共役勾配法
-- **前処理（対称Gauss-Seidel）**:
+- CG/BiCGSTABは前処理オプション（none / sor）をサポート
+- **前処理（sor: 対称Gauss-Seidel）**:
   - 対称Gauss-Seidel前処理: 前進スイープ → 後退スイープを交互に実行
   - `PRECONDITIONER_ITERATION = 4`（ハードコード）: 前進2回 + 後退2回（対称性を保持、Gauss-Seidel 4 sweep）
   - 各スイープでRed-Black順序を使用し並列化可能
   - 前処理行列 M ≈ (D + L) D⁻¹ (D + U) の近似逆行列として作用
+  - none指定時は前処理を行わない
 - **圧力平均値の引き戻し**: Periodic境界では周期条件、それ以外はNeumann条件のため、圧力場の定数不定性によるドリフトを防ぐ目的で常に全セル平均を減算する
 - 圧力平均値の引き戻しでは mask=0（物体セル）を平均計算から除外する
 - 残差は初期残差で正規化（H2方式）して収束判定する
@@ -737,12 +738,18 @@ end
     Abort             # 計算を停止
 end
 
+@enum PreconditionerType begin
+    PrecondNone
+    PrecondSOR
+end
+
 struct PoissonConfig
     solver::SolverType
     omega::Float64             # SOR加速係数
     tol::Float64               # 収束判定値
     max_iter::Int              # 最大反復回数
     on_divergence::DivergenceAction  # 収束失敗時の動作（デフォルト: WarnContinue）
+    preconditioner::PreconditionerType  # 前処理（CG/BiCGSTABのみ）
 end
 
 function solve_poisson!(

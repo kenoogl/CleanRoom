@@ -7,8 +7,9 @@ using ..BoundaryConditions
 using LinearAlgebra # for norm
 using FLoops
 
-export SolverType, DivergenceAction, PoissonConfig
+export SolverType, DivergenceAction, PreconditionerType, PoissonConfig
 export RedBlackSOR, CG, BiCGSTAB, WarnContinue, Abort
+export PrecondNone, PrecondSOR
 export solve_poisson!
 
 const PRECONDITIONER_SWEEPS = 4
@@ -24,12 +25,18 @@ end
     Abort             # 計算を停止
 end
 
+@enum PreconditionerType begin
+    PrecondNone
+    PrecondSOR
+end
+
 struct PoissonConfig
     solver::SolverType
     omega::Float64             # SOR加速係数
     tol::Float64               # 収束判定値
     max_iter::Int              # 最大反復回数
     on_divergence::DivergenceAction  # 収束失敗時の動作
+    preconditioner::PreconditionerType  # 前処理種別（CG/BiCGSTABのみ）
     mach2::Float64             # 弱圧縮性係数 M^2
 end
 
@@ -245,7 +252,7 @@ function solve_poisson_cg!(
     end
     
     # 2. Preconditioner: z = M^-1 r (Gauss-Seidel)
-    apply_preconditioner!(z, r, mask, grid, helm_alpha)
+    apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner)
     
     # 3. p = z
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
@@ -292,7 +299,7 @@ function solve_poisson_cg!(
         end
         
         # 9. Preconditioner: z = M^-1 r
-        apply_preconditioner!(z, r, mask, grid, helm_alpha)
+        apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner)
         
         # 10. rho_new = r·z
         rho_new = dot_product_cg(r, z, mask, grid, par)
@@ -495,17 +502,22 @@ function compute_residual_sor(
 end
 
 """
-    apply_preconditioner!(z, r, mask, grid, alpha)
+    apply_preconditioner!(z, r, mask, grid, alpha, precond)
 
-Apply Gauss-Seidel preconditioner to solve M z = r.
+Apply preconditioner to solve M z = r.
 """
 function apply_preconditioner!(
     z::Array{Float64, 3},
     r::Array{Float64, 3},
     mask::Array{Float64, 3},
     grid::GridData,
-    alpha::Float64
+    alpha::Float64,
+    precond::PreconditionerType
 )
+    if precond == PrecondNone
+        copyto!(z, r)
+        return
+    end
     fill!(z, 0.0)
     dx, dy = grid.dx, grid.dy
     mx, my, mz = grid.mx, grid.my, grid.mz
@@ -662,7 +674,7 @@ function solve_poisson_bicgstab!(
         end
 
         # phat = M^-1 p
-        apply_preconditioner!(phat, pvec, mask, grid, alpha)
+        apply_preconditioner!(phat, pvec, mask, grid, alpha, config.preconditioner)
 
         # v = A * phat
         calc_laplacian_cg!(v, phat, mask, grid, par, alpha)
@@ -691,7 +703,7 @@ function solve_poisson_bicgstab!(
         end
 
         # shat = M^-1 s
-        apply_preconditioner!(shat, r, mask, grid, alpha)
+        apply_preconditioner!(shat, r, mask, grid, alpha, config.preconditioner)
 
         # t = A * shat (reuse rhs array)
         calc_laplacian_cg!(t, shat, mask, grid, par, alpha)

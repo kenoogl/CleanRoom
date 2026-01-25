@@ -91,6 +91,7 @@ Outflow境界では粘性項をゼロとし、対流項のみで流出条件を�
 - [x] 7.1: PRECONDITIONER_SWEEPSを4に変更
 - [x] 7.2: BiCGSTAB法を実装（前処理付き）
 - [x] 7.3: on_divergence設定（WarnContinue/Abort）の動作を実装
+- [x] 7.4: CG/BiCGSTABの前処理オプション（none/sor）を追加し、noneは前処理なしとする
 
 ---
 
@@ -165,6 +166,7 @@ f⁻用の右側再構成関数を追加
 - [x] 13.1: condition.txt出力関数を実装
 - [x] 13.2: 物理パラメータ、格子、時間積分、境界条件、出力間隔を記録
 - [x] 13.3: condition.txtにOpening/内部境界/境界優先順位/動的マスク設定を含める
+- [x] 13.4: condition.txtに前処理オプション（none/sor）を出力する
 
 ---
 

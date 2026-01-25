@@ -6,6 +6,7 @@
   "Reference_Velocity": 0.5,
   "Kinematic_Viscosity": 0.01,
   "Smagorinsky_Constant": 0.2,
+  "Sound_Speed": 340.0,
   "Origin_of_Region": [
     0.0,
     0.0,
@@ -48,9 +49,10 @@
   "Poisson_parameter": {
     "solver": "RedBlackSOR",
     "coef_acceleration": 0.8,
-    "convergence_criteria": 1.0e-4,
+    "convergence_criteria": 0.0001,
     "Iteration_max": 1000,
-    "on_divergence": "WarnContinue"
+    "on_divergence": "WarnContinue",
+    "preconditioner": "sor"
   },
   "Start_time_for_averaging": 0.0,
   "Time_Integration_Scheme": "RK2",

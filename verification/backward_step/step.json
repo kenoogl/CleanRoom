@@ -4,7 +4,7 @@
   "Max_step": 1000,
   "Reference_Length": 0.3,
   "Reference_Velocity": 5.0,
-  "Kinematic_Viscosity": 1.5e-5,
+  "Kinematic_Viscosity": 1.5e-05,
   "Smagorinsky_Constant": 0.2,
   "Origin_of_Region": [
     -0.5,
@@ -48,9 +48,10 @@
   "Poisson_parameter": {
     "solver": "RedBlackSOR",
     "coef_acceleration": 1.2,
-    "convergence_criteria": 1.0e-3,
+    "convergence_criteria": 0.001,
     "Iteration_max": 500,
-    "on_divergence": "WarnContinue"
+    "on_divergence": "WarnContinue",
+    "preconditioner": "sor"
   },
   "Start_time_for_averaging": 0.0,
   "Time_Integration_Scheme": "RK2",

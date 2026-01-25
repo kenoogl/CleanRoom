@@ -47,15 +47,16 @@
     "text_output": false
   },
   "Poisson_parameter": {
-    "solver": "RedBlackSOR",
+    "solver": "CG",
     "coef_acceleration": 1.2,
-    "convergence_criteria": 1.0e-3,
+    "convergence_criteria": 0.001,
     "Iteration_max": 1000,
-    "on_divergence": "Abort"
+    "on_divergence": "Abort",
+    "preconditioner": "none"
   },
   "Start_time_for_averaging": 10.0,
   "Time_Integration_Scheme": "RK2",
-  "divMax_threshold": 1.0e+1,
+  "divMax_threshold": 10.0,
   "Initial_Condition": {
     "velocity": [
       0.0,

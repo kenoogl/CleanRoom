@@ -39,8 +39,8 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/verification/cavity/cav
   Internal Boundaries:   0
 
 --- Poisson Solver ---
-  Solver:                RedBlackSOR
-  SOR Omega:                      1.2
+  Solver:                CG
+  Preconditioner:        PrecondNone
   Convergence Criteria:       1.0e-03
   Max Iterations:                1000
 

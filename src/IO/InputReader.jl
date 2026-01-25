@@ -225,12 +225,19 @@ function load_parameters(filepath::String)::SimulationParams
     div_action_str = lowercase(String(get(p, :on_divergence, "warncontinue")))
     action_type = (div_action_str == "abort") ? Abort : WarnContinue
 
+    precond_str = lowercase(String(get(p, :preconditioner, "sor")))
+    precond_type = if precond_str == "none"; PrecondNone
+                   elseif precond_str == "sor"; PrecondSOR
+                   else; error("Unknown preconditioner: $(precond_str)")
+                   end
+
     poisson_config = PoissonConfig(
         solver_type,
         Float64(p.coef_acceleration),
         Float64(p.convergence_criteria),
         Int(p.Iteration_max),
         action_type,
+        precond_type,
         mach2
     )
 

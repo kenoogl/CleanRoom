@@ -6,7 +6,11 @@
   "Reference_Velocity": 1.0,
   "Kinematic_Viscosity": 0.01,
   "Smagorinsky_Constant": 0.2,
-  "Origin_of_Region": [0.0, 0.0, 0.0],
+  "Origin_of_Region": [
+    0.0,
+    0.0,
+    0.0
+  ],
   "Domain": {
     "Lx": 1.0,
     "Ly": 1.0,
@@ -30,15 +34,20 @@
   "Poisson_parameter": {
     "solver": "RedBlackSOR",
     "coef_acceleration": 1.5,
-    "convergence_criteria": 1.0e-5,
+    "convergence_criteria": 1e-05,
     "Iteration_max": 100,
-    "on_divergence": "WarnContinue"
+    "on_divergence": "WarnContinue",
+    "preconditioner": "sor"
   },
   "Start_time_for_averaging": 0.0,
   "Time_Integration_Scheme": "Euler",
   "divMax_threshold": 20.0,
   "Initial_Condition": {
-    "velocity": [0.0, 0.0, 0.0],
+    "velocity": [
+      0.0,
+      0.0,
+      0.0
+    ],
     "pressure": 0.0
   },
   "Restart": {
