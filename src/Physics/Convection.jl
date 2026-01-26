@@ -214,9 +214,9 @@ function add_convection_flux!(
         buffers.flux_w[i, j, k] -= flx / grid.dz[k]
         buffers.flux_w[i, j, k+1] += flx / grid.dz[k+1]
     end
-    # --- Inflow Boundary Correction ---
+    #= Inflow Boundary Correction (disabled)
     # Apply explicit convective flux for Inflow boundaries (where mask=0 zeroes out the flux)
-    # Flux = u_bc * phi_bc * Area / Vol_cell? 
+    # Flux = u_bc * phi_bc * Area / Vol_cell?
     # Finite Volume: d/dt(phi) = -1/Vol * sum(Flux * Area)
     # buffer.flux is "sum(Flux*Area)/Vol" term (or actually just d/dx term).
     # In loop above: buffers.flux_u[i] -= flx / dx
@@ -315,6 +315,7 @@ function add_convection_flux!(
             buffers.flux_w[i, j, mz-2] -= (w_bc * w_bc) / grid.dz[mz-2]
         end
     end
+    =#
 
 
 end

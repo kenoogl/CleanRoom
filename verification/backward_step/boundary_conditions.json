@@ -17,12 +17,12 @@
     },
     "y_min": {
       "velocity": {
-        "type": "periodic"
+        "type": "wall"
       }
     },
     "y_max": {
       "velocity": {
-        "type": "periodic"
+        "type": "wall"
       }
     },
     "z_min": {

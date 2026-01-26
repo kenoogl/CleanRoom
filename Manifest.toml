@@ -200,13 +200,10 @@ weakdeps = ["SparseArrays"]
     ChainRulesCoreSparseArraysExt = "SparseArrays"
 
 [[deps.CleanroomSolver]]
-deps = ["CairoMakie", "FLoops", "JSON3", "LinearAlgebra", "Printf"]
+deps = ["CairoMakie", "FLoops", "JSON3", "LinearAlgebra", "Plots", "Printf"]
 path = "."
 uuid = "93dacaec-b53d-448b-9912-9ea887e3fda1"
 version = "0.1.0"
-
-    [deps.CleanroomSolver.extensions]
-    CleanroomVisualizationExt = "CairoMakie"
 
 [[deps.CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]

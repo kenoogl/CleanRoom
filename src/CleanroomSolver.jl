@@ -199,20 +199,13 @@ function run_simulation(param_file::String)
         time += dt_fixed
 
         # Stability monitoring (CFL/Diffusion) every step
-        cfl = compute_cfl(buffers, grid, dt_fixed)
+        cfl, cfl_i, cfl_j, cfl_k = compute_cfl(buffers, grid, dt_fixed)
         dx_min = min(grid.dx, grid.dy)
         if !isempty(grid.dz)
             dx_min = min(dx_min, minimum(grid.dz))
         end
         diff_num = nu_lam * dt_fixed / (dx_min^2)
-        if cfl > 1.0 || diff_num >= 0.5
-            println("Stability violation: CFL=$cfl, D=$diff_num")
-            if !sim_params.dry_run
-                break
-            end
-        end
-        
-        u_max = compute_u_max(buffers, grid)
+        u_max, u_i, u_j, u_k = compute_u_max(buffers, grid)
         div_max, div_i, div_j, div_k = compute_divergence_max(buffers, grid)
         
         # Compute velocity change for steady-state check
@@ -233,6 +226,104 @@ function run_simulation(param_file::String)
         mon_data = MonitorData(step, time, u_max, div_max, (div_i, div_j, div_k), dU, pitr, pres)
         open(joinpath(out_dir, "history.txt"), "a") do io
             log_step!(mon_data, monitor_config; console_io=stdout, history_io=io)
+        end
+        if sim_params.debug && monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
+            uc = BoundaryConditions.compute_outflow_uc(
+                buffers.u, buffers.v, buffers.w, grid, buffers.mask, bc_set
+            )
+            @printf("  Outflow Uc (nd): x_min=%.4e x_max=%.4e y_min=%.4e y_max=%.4e z_min=%.4e z_max=%.4e\n",
+                uc.x_min, uc.x_max, uc.y_min, uc.y_max, uc.z_min, uc.z_max)
+            if !isempty(bc_set.openings)
+                for (op_idx, op) in enumerate(bc_set.openings)
+                    if op.flow_type == OpeningOutlet && any(isnan, op.velocity)
+                        face = op.boundary
+                        region_check = (i, j, k) -> BoundaryConditions.is_in_opening(op, grid, i, j, k)
+                        uc_region = BoundaryConditions.compute_region_average_velocity(
+                            buffers.u, buffers.v, buffers.w, grid, face, region_check
+                        )
+                        label = isempty(op.name) ? "opening[$op_idx]" : op.name
+                        @printf("  OpeningOutlet Uc (nd): %s @ %s = %.4e\n", label, face, uc_region)
+                    end
+                end
+            end
+        end
+
+        if cfl > 1.0 || diff_num >= 0.5
+            if sim_params.debug
+                u_c = buffers.u[cfl_i, cfl_j, cfl_k]
+                v_c = buffers.v[cfl_i, cfl_j, cfl_k]
+                w_c = buffers.w[cfl_i, cfl_j, cfl_k]
+                m_c = buffers.mask[cfl_i, cfl_j, cfl_k]
+                u_m = buffers.u[u_i, u_j, u_k]
+                v_m = buffers.v[u_i, u_j, u_k]
+                w_m = buffers.w[u_i, u_j, u_k]
+                ustar_max = 0.0
+                us_i, us_j, us_k = 0, 0, 0
+                rhs_max = 0.0
+                rh_i, rh_j, rh_k = 0, 0, 0
+                p_max = 0.0
+                p_i, p_j, p_k = 0, 0, 0
+                divu_max = 0.0
+                du_i, du_j, du_k = 0, 0, 0
+                @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+                    m0 = buffers.mask[i, j, k]
+                    if m0 == 0.0
+                        continue
+                    end
+                    um = buffers.u_star[i, j, k]
+                    vm = buffers.v_star[i, j, k]
+                    wm = buffers.w_star[i, j, k]
+                    mag = sqrt(um^2 + vm^2 + wm^2)
+                    if mag > ustar_max
+                        ustar_max = mag
+                        us_i, us_j, us_k = i, j, k
+                    end
+                    rv = abs(buffers.rhs[i, j, k])
+                    if rv > rhs_max
+                        rhs_max = rv
+                        rh_i, rh_j, rh_k = i, j, k
+                    end
+                    pv = abs(buffers.p[i, j, k])
+                    if pv > p_max
+                        p_max = pv
+                        p_i, p_j, p_k = i, j, k
+                    end
+                    # div(u*) max (use face-averaged u* with mask)
+                    u_fr = 0.5 * (buffers.u_star[i+1, j, k] + buffers.u_star[i, j, k]) * buffers.mask[i+1, j, k] * m0
+                    u_fl = 0.5 * (buffers.u_star[i, j, k] + buffers.u_star[i-1, j, k]) * buffers.mask[i-1, j, k] * m0
+                    v_ft = 0.5 * (buffers.v_star[i, j+1, k] + buffers.v_star[i, j, k]) * buffers.mask[i, j+1, k] * m0
+                    v_fb = 0.5 * (buffers.v_star[i, j, k] + buffers.v_star[i, j-1, k]) * buffers.mask[i, j-1, k] * m0
+                    w_fu = 0.5 * (buffers.w_star[i, j, k+1] + buffers.w_star[i, j, k]) * buffers.mask[i, j, k+1] * m0
+                    w_fd = 0.5 * (buffers.w_star[i, j, k] + buffers.w_star[i, j, k-1]) * buffers.mask[i, j, k-1] * m0
+                    dz = grid.dz[k]
+                    divu = (u_fr - u_fl) / grid.dx + (v_ft - v_fb) / grid.dy + (w_fu - w_fd) / dz
+                    abs_divu = abs(divu)
+                    if abs_divu > divu_max
+                        divu_max = abs_divu
+                        du_i, du_j, du_k = i, j, k
+                    end
+                end
+                # Poisson residuals using pressure mask (inflow/outflow/opening set to 0)
+                update_boundary_mask!(buffers.mask, grid, bc_set, 0.0)
+                alpha = sim_params.poisson.mach2 / (dt_fixed * dt_fixed)
+                res0 = PressureSolver.compute_residual_sor(buffers.p_prev, buffers.rhs, buffers.mask, grid, sim_params.poisson.omega, alpha)
+                res1 = PressureSolver.compute_residual_sor(buffers.p, buffers.rhs, buffers.mask, grid, sim_params.poisson.omega, alpha)
+                update_boundary_mask!(buffers.mask, grid, bc_set, 1.0)
+                println("Stability violation: CFL=$cfl, D=$diff_num")
+                println("  CFL max at (i,j,k)=($(cfl_i),$(cfl_j),$(cfl_k)) mask=$(m_c) u=$(u_c) v=$(v_c) w=$(w_c)")
+                println("  Umax at (i,j,k)=($(u_i),$(u_j),$(u_k)) |U|=$(u_max) u=$(u_m) v=$(v_m) w=$(w_m)")
+                println("  U* max at (i,j,k)=($(us_i),$(us_j),$(us_k)) |U*|=$(ustar_max)")
+                println("  RHS max at (i,j,k)=($(rh_i),$(rh_j),$(rh_k)) |rhs|=$(rhs_max)")
+                println("  |p| max at (i,j,k)=($(p_i),$(p_j),$(p_k)) |p|=$(p_max)")
+                println("  |div(u*)| max at (i,j,k)=($(du_i),$(du_j),$(du_k)) |div|=$(divu_max)")
+                println("  Poisson residuals: r0=$(res0) r1=$(res1)")
+                println("  Poisson: iter=$(pitr) res=$(pres)")
+            else
+                println("Stability violation: CFL=$cfl, D=$diff_num")
+            end
+            if !sim_params.dry_run
+                break
+            end
         end
         
         if check_divergence(div_max, monitor_config.div_threshold)

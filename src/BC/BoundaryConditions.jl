@@ -68,60 +68,85 @@ struct BoundaryConditionSet
 end
 
 """
-    compute_face_average_velocity(buffers, grid, face)
+    compute_face_average_velocity(u, v, w, grid, mask, face)
 
-境界面の平均流速を計算する。
+境界面の平均流速を計算する。部分マスクがかかっている場合は除外する。
 """
 function compute_face_average_velocity(
     u::Array{Float64, 3},
     v::Array{Float64, 3},
     w::Array{Float64, 3},
     grid::GridData,
+    mask::Array{Float64, 3},
     face::Symbol
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     sum_vel = 0.0
-    count = 0
+    count = 0.0
     
     if face == :x_min
         i = 3 # Boundary cell (Real start)
         for k in 3:mz-2, j in 3:my-2
-            sum_vel += u[i, j, k]
-            count += 1
+            m0 = mask[i, j, k]
+            sum_vel += u[i, j, k] * m0
+            count += m0
         end
     elseif face == :x_max
         i = mx-2
         for k in 3:mz-2, j in 3:my-2
-            sum_vel += u[i, j, k]
-            count += 1
+            m0 = mask[i, j, k]
+            sum_vel += u[i, j, k] * m0
+            count += m0
         end
     elseif face == :y_min
         j = 3
         for k in 3:mz-2, i in 3:mx-2
-            sum_vel += v[i, j, k]
-            count += 1
+            m0 = mask[i, j, k]
+            sum_vel += v[i, j, k] * m0
+            count += m0
         end
     elseif face == :y_max
         j = my-2
         for k in 3:mz-2, i in 3:mx-2
-            sum_vel += v[i, j, k]
-            count += 1
+            m0 = mask[i, j, k]
+            sum_vel += v[i, j, k] * m0
+            count += m0
         end
     elseif face == :z_min
         k = 3
         for j in 3:my-2, i in 3:mx-2
-            sum_vel += w[i, j, k]
-            count += 1
+            m0 = mask[i, j, k]
+            sum_vel += w[i, j, k] * m0
+            count += m0
         end
     elseif face == :z_max
         k = mz-2
         for j in 3:my-2, i in 3:mx-2
-            sum_vel += w[i, j, k]
-            count += 1
+            m0 = mask[i, j, k]
+            sum_vel += w[i, j, k] * m0
+            count += m0
         end
     end
     
-    return (count > 0) ? sum_vel / count : 0.0
+    return (count > 0.0) ? sum_vel / count : 0.0
+end
+
+function compute_outflow_uc(
+    u::Array{Float64, 3},
+    v::Array{Float64, 3},
+    w::Array{Float64, 3},
+    grid::GridData,
+    mask::Array{Float64, 3},
+    bc_set::BoundaryConditionSet
+)
+    return (
+        x_min = bc_set.x_min.velocity_type == Outflow ? compute_face_average_velocity(u, v, w, grid, mask, :x_min) : 0.0,
+        x_max = bc_set.x_max.velocity_type == Outflow ? compute_face_average_velocity(u, v, w, grid, mask, :x_max) : 0.0,
+        y_min = bc_set.y_min.velocity_type == Outflow ? compute_face_average_velocity(u, v, w, grid, mask, :y_min) : 0.0,
+        y_max = bc_set.y_max.velocity_type == Outflow ? compute_face_average_velocity(u, v, w, grid, mask, :y_max) : 0.0,
+        z_min = bc_set.z_min.velocity_type == Outflow ? compute_face_average_velocity(u, v, w, grid, mask, :z_min) : 0.0,
+        z_max = bc_set.z_max.velocity_type == Outflow ? compute_face_average_velocity(u, v, w, grid, mask, :z_max) : 0.0
+    )
 end
 
 function compute_region_average_velocity(
@@ -241,7 +266,7 @@ end
 end
 
 """
-    apply_outflow!(phi, grid, face, dt, Uc)
+    apply_outflow!(phi, grid, face, dt, Uc; phi_ref=phi)
 
 対流流出条件を適用する。
 """
@@ -250,11 +275,12 @@ function apply_outflow!(
     grid::GridData,
     face::Symbol,
     dt::Float64,
-    Uc::Float64
+    Uc::Float64;
+    phi_ref::Array{Float64, 3}=phi
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     
-    # 1st order upwind: phi_new = phi - Uc * dt/dx * (phi - phi_inner)
+    # 1st order upwind: phi_new = phi_ref - Uc * dt/dx * (phi_ref - phi_ref_inner)
     # If Uc > 0 (outflow), we use values from upstream/inner.
     # Boundary is at ghost cell? No, usually boundary condition sets values at Ghost Cells
     # OR at boundary face.
@@ -277,7 +303,7 @@ function apply_outflow!(
         dx = grid.dx
         c = Uc * dt / dx
         @inbounds for k in 1:mz, j in 1:my
-            phi[mx-1, j, k] = phi[mx-1, j, k] - c * (phi[mx-1, j, k] - phi[mx-2, j, k])
+            phi[mx-1, j, k] = phi_ref[mx-1, j, k] - c * (phi_ref[mx-1, j, k] - phi_ref[mx-2, j, k])
             phi[mx, j, k] = phi[mx-1, j, k] # Copy to outer ghost
         end
     elseif face == :x_min
@@ -290,21 +316,21 @@ function apply_outflow!(
         dx = grid.dx
         c = Uc * dt / dx
         @inbounds for k in 1:mz, j in 1:my
-            phi[2, j, k] = phi[2, j, k] - c * (phi[3, j, k] - phi[2, j, k])
+            phi[2, j, k] = phi_ref[2, j, k] - c * (phi_ref[3, j, k] - phi_ref[2, j, k])
             phi[1, j, k] = phi[2, j, k]
         end
     elseif face == :y_max
         dy = grid.dy
         c = Uc * dt / dy
         @inbounds for k in 1:mz, i in 1:mx
-            phi[i, my-1, k] = phi[i, my-1, k] - c * (phi[i, my-1, k] - phi[i, my-2, k])
+            phi[i, my-1, k] = phi_ref[i, my-1, k] - c * (phi_ref[i, my-1, k] - phi_ref[i, my-2, k])
             phi[i, my, k] = phi[i, my-1, k]
         end
     elseif face == :y_min
         dy = grid.dy
         c = Uc * dt / dy
         @inbounds for k in 1:mz, i in 1:mx
-            phi[i, 2, k] = phi[i, 2, k] - c * (phi[i, 3, k] - phi[i, 2, k])
+            phi[i, 2, k] = phi_ref[i, 2, k] - c * (phi_ref[i, 3, k] - phi_ref[i, 2, k])
             phi[i, 1, k] = phi[i, 2, k]
         end
     elseif face == :z_max
@@ -314,21 +340,21 @@ function apply_outflow!(
         dz = grid.dz[mz-2]
         c = Uc * dt / dz
         @inbounds for j in 1:my, i in 1:mx
-            phi[i, j, mz-1] = phi[i, j, mz-1] - c * (phi[i, j, mz-1] - phi[i, j, mz-2])
+            phi[i, j, mz-1] = phi_ref[i, j, mz-1] - c * (phi_ref[i, j, mz-1] - phi_ref[i, j, mz-2])
             phi[i, j, mz] = phi[i, j, mz-1]
         end
     elseif face == :z_min
         dz = grid.dz[3]
         c = Uc * dt / dz
         @inbounds for j in 1:my, i in 1:mx
-            phi[i, j, 2] = phi[i, j, 2] - c * (phi[i, j, 3] - phi[i, j, 2])
+            phi[i, j, 2] = phi_ref[i, j, 2] - c * (phi_ref[i, j, 3] - phi_ref[i, j, 2])
             phi[i, j, 1] = phi[i, j, 2]
         end
     end
 end
 
 """
-    apply_outflow_region!(phi, grid, face, dt, Uc, region_check)
+    apply_outflow_region!(phi, grid, face, dt, Uc, region_check; phi_ref=phi)
 
 領域指定付きの対流流出条件を適用する。
 `Outflow` 条件が指定された `InletOutlet`（パッチ）に対して、
@@ -343,7 +369,8 @@ function apply_outflow_region!(
     face::Symbol,
     dt::Float64,
     Uc::Float64,
-    region_check::Function
+    region_check::Function;
+    phi_ref::Array{Float64, 3}=phi
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     if face == :x_max
@@ -352,7 +379,7 @@ function apply_outflow_region!(
         i_inner = mx - 2
         @inbounds for k in 3:mz-2, j in 3:my-2
             if region_check(i_inner, j, k)
-                phi[mx-1, j, k] = phi[mx-1, j, k] - c * (phi[mx-1, j, k] - phi[mx-2, j, k])
+                phi[mx-1, j, k] = phi_ref[mx-1, j, k] - c * (phi_ref[mx-1, j, k] - phi_ref[mx-2, j, k])
                 phi[mx, j, k] = phi[mx-1, j, k]
             end
         end
@@ -362,7 +389,7 @@ function apply_outflow_region!(
         i_inner = 3
         @inbounds for k in 3:mz-2, j in 3:my-2
             if region_check(i_inner, j, k)
-                phi[2, j, k] = phi[2, j, k] - c * (phi[3, j, k] - phi[2, j, k])
+                phi[2, j, k] = phi_ref[2, j, k] - c * (phi_ref[3, j, k] - phi_ref[2, j, k])
                 phi[1, j, k] = phi[2, j, k]
             end
         end
@@ -372,7 +399,7 @@ function apply_outflow_region!(
         j_inner = my - 2
         @inbounds for k in 3:mz-2, i in 3:mx-2
             if region_check(i, j_inner, k)
-                phi[i, my-1, k] = phi[i, my-1, k] - c * (phi[i, my-1, k] - phi[i, my-2, k])
+                phi[i, my-1, k] = phi_ref[i, my-1, k] - c * (phi_ref[i, my-1, k] - phi_ref[i, my-2, k])
                 phi[i, my, k] = phi[i, my-1, k]
             end
         end
@@ -382,7 +409,7 @@ function apply_outflow_region!(
         j_inner = 3
         @inbounds for k in 3:mz-2, i in 3:mx-2
             if region_check(i, j_inner, k)
-                phi[i, 2, k] = phi[i, 2, k] - c * (phi[i, 3, k] - phi[i, 2, k])
+                phi[i, 2, k] = phi_ref[i, 2, k] - c * (phi_ref[i, 3, k] - phi_ref[i, 2, k])
                 phi[i, 1, k] = phi[i, 2, k]
             end
         end
@@ -392,7 +419,7 @@ function apply_outflow_region!(
         k_inner = mz - 2
         @inbounds for j in 3:my-2, i in 3:mx-2
             if region_check(i, j, k_inner)
-                phi[i, j, mz-1] = phi[i, j, mz-1] - c * (phi[i, j, mz-1] - phi[i, j, mz-2])
+                phi[i, j, mz-1] = phi_ref[i, j, mz-1] - c * (phi_ref[i, j, mz-1] - phi_ref[i, j, mz-2])
                 phi[i, j, mz] = phi[i, j, mz-1]
             end
         end
@@ -402,7 +429,7 @@ function apply_outflow_region!(
         k_inner = 3
         @inbounds for j in 3:my-2, i in 3:mx-2
             if region_check(i, j, k_inner)
-                phi[i, j, 2] = phi[i, j, 2] - c * (phi[i, j, 3] - phi[i, j, 2])
+                phi[i, j, 2] = phi_ref[i, j, 2] - c * (phi_ref[i, j, 3] - phi_ref[i, j, 2])
                 phi[i, j, 1] = phi[i, j, 2]
             end
         end
@@ -745,8 +772,25 @@ function apply_periodic_pressure!(
 end
 
 
+@inline function face_uc(uc, face::Symbol)
+    if face == :x_min
+        return uc.x_min
+    elseif face == :x_max
+        return uc.x_max
+    elseif face == :y_min
+        return uc.y_min
+    elseif face == :y_max
+        return uc.y_max
+    elseif face == :z_min
+        return uc.z_min
+    elseif face == :z_max
+        return uc.z_max
+    end
+    return 0.0
+end
+
 """
-    apply_velocity_bcs!(u, v, w, grid, mask, bc_set, dt)
+    apply_velocity_bcs!(u, v, w, grid, mask, bc_set, dt; u_ref=u, v_ref=v, w_ref=w, Uc=compute_outflow_uc(u_ref, v_ref, w_ref, grid, mask, bc_set))
 
 指定された速度場(u, v, w)に対して境界条件を適用する。
 """
@@ -757,7 +801,11 @@ function apply_velocity_bcs!(
     grid::GridData,
     mask::Array{Float64, 3},
     bc_set::BoundaryConditionSet,
-    dt::Float64
+    dt::Float64;
+    u_ref::Array{Float64, 3}=u,
+    v_ref::Array{Float64, 3}=v,
+    w_ref::Array{Float64, 3}=w,
+    Uc=compute_outflow_uc(u_ref, v_ref, w_ref, grid, mask, bc_set)
 )
     # 1. External Boundaries
     function apply_ext(bc, face)
@@ -766,10 +814,10 @@ function apply_velocity_bcs!(
              set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], :dirichlet)
              set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], :dirichlet)
         elseif bc.velocity_type == Outflow
-             Uc = compute_face_average_velocity(u, v, w, grid, face)
-             apply_outflow!(u, grid, face, dt, Uc)
-             apply_outflow!(v, grid, face, dt, Uc)
-             apply_outflow!(w, grid, face, dt, Uc)
+             uc_face = face_uc(Uc, face)
+             apply_outflow!(u, grid, face, dt, uc_face; phi_ref=u_ref)
+             apply_outflow!(v, grid, face, dt, uc_face; phi_ref=v_ref)
+             apply_outflow!(w, grid, face, dt, uc_face; phi_ref=w_ref)
         elseif bc.velocity_type == Symmetric
              apply_symmetric_bc!(u, v, w, grid, face)
         elseif bc.velocity_type == Wall
@@ -836,10 +884,10 @@ function apply_velocity_bcs!(
             end
         elseif op.flow_type == OpeningOutlet
             if any(isnan, op.velocity)
-                Uc = compute_region_average_velocity(u, v, w, grid, face, region_check)
-                apply_outflow_region!(u, grid, face, dt, Uc, region_check)
-                apply_outflow_region!(v, grid, face, dt, Uc, region_check)
-                apply_outflow_region!(w, grid, face, dt, Uc, region_check)
+                uc_region = compute_region_average_velocity(u_ref, v_ref, w_ref, grid, face, region_check)
+                apply_outflow_region!(u, grid, face, dt, uc_region, region_check; phi_ref=u_ref)
+                apply_outflow_region!(v, grid, face, dt, uc_region, region_check; phi_ref=v_ref)
+                apply_outflow_region!(w, grid, face, dt, uc_region, region_check; phi_ref=w_ref)
             else
                 for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
                     if region_check(i, j, k)

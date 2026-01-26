@@ -91,6 +91,7 @@ function write_condition_file(
         @printf(io, "  %-22s %12.4g\n", "Courant Number:", sim_params.courant_number)
         @printf(io, "  %-22s %12.6g (dimensionless)\n", "Fixed Time Step Δt*:", dt_fixed)
         @printf(io, "  %-22s %12.6g [s]\n", "Fixed Time Step Δt:", dt_fixed * dim_params.T0)
+        @printf(io, "  %-22s %s\n", "Debug:", sim_params.debug ? "yes" : "no")
         
         # Diffusion number: (1/Re) * dt / dx^2
         inv_re = 1.0 / dim_params.Re
@@ -151,26 +152,39 @@ end
 
 function compute_u_max(buffers::CFDBuffers, grid::GridData)
     umax = 0.0
+    u_i, u_j, u_k = 0, 0, 0
     u, v, w = buffers.u, buffers.v, buffers.w
     @inbounds for k in 1:grid.mz, j in 1:grid.my, i in 1:grid.mx
         mag = sqrt(u[i, j, k]^2 + v[i, j, k]^2 + w[i, j, k]^2)
-        if mag > umax; umax = mag; end
+        if mag > umax
+            umax = mag
+            u_i, u_j, u_k = i, j, k
+        end
     end
-    return umax
+    return umax, u_i, u_j, u_k
 end
 
 function compute_cfl(buffers::CFDBuffers, grid::GridData, dt::Float64)
     cfl_max = 0.0
+    cfl_i, cfl_j, cfl_k = 0, 0, 0
     u, v, w = buffers.u, buffers.v, buffers.w
+    mask = buffers.mask
     dx, dy = grid.dx, grid.dy
     @inbounds for k in 3:grid.mz-2
         dz = grid.dz[k]
         for j in 3:grid.my-2, i in 3:grid.mx-2
-             val = abs(u[i, j, k])/dx + abs(v[i, j, k])/dy + abs(w[i, j, k])/dz
-             if val > cfl_max; cfl_max = val; end
+             m0 = mask[i, j, k]
+             cfl_x = abs(u[i, j, k]) * dt / dx
+             cfl_y = abs(v[i, j, k]) * dt / dy
+             cfl_z = abs(w[i, j, k]) * dt / dz
+             val = max(cfl_x, cfl_y, cfl_z) * m0
+             if val > cfl_max
+                 cfl_max = val
+                 cfl_i, cfl_j, cfl_k = i, j, k
+             end
         end
     end
-    return cfl_max * dt
+    return cfl_max, cfl_i, cfl_j, cfl_k
 end
 
 function compute_divergence_max(buffers::CFDBuffers, grid::GridData)::Tuple{Float64, Int, Int, Int}

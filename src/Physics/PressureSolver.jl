@@ -14,6 +14,25 @@ export solve_poisson!
 
 const PRECONDITIONER_SWEEPS = 4
 
+@inline function apply_periodic_pressure_if_needed!(
+    p::Array{Float64, 3},
+    grid::GridData,
+    bc_set
+)
+    if isnothing(bc_set)
+        return
+    end
+    if bc_set.x_min.velocity_type == Periodic && bc_set.x_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :x)
+    end
+    if bc_set.y_min.velocity_type == Periodic && bc_set.y_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :y)
+    end
+    if bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
+        apply_periodic_pressure!(p, grid, :z)
+    end
+end
+
 @enum SolverType begin
     RedBlackSOR
     CG
@@ -85,7 +104,8 @@ function solve_poisson!(
     
     avg_p = sum_p / count
     @inbounds for k in 1:mz, j in 1:my, i in 1:mx
-        p[i, j, k] = mask[i, j, k] * (p[i, j, k] - avg_p)
+        m0 = mask[i, j, k]
+        p[i, j, k] = m0 * (p[i, j, k] - avg_p) + (1.0-m0)*avg_p
     end
 
     if !converged && config.on_divergence == WarnContinue
@@ -244,6 +264,7 @@ function solve_poisson_cg!(
     z = buffers.nu_t         # Preconditioned residual (temporary)
     
     # 1. Compute initial residual: r = b - Ap
+    apply_periodic_pressure_if_needed!(p, grid, bc_set)
     res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, helm_alpha)
     if res0 == 0.0
         return (true, 0, 0.0)
@@ -268,6 +289,7 @@ function solve_poisson_cg!(
         iter = itr
         
         # 4. q = A * p
+        apply_periodic_pressure_if_needed!(pk, grid, bc_set)
         calc_laplacian_cg!(q, pk, mask, grid, par, helm_alpha)
         
         # 5. alpha = rho_old / (p·q)
@@ -636,6 +658,7 @@ function solve_poisson_bicgstab!(
     t = buffers.rhs          # reuse rhs as temporary for t = A * shat
 
     # Initial residual r = b - A p
+    apply_periodic_pressure_if_needed!(p, grid, bc_set)
     res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
     if res0 == 0.0
         return (true, 0, 0.0)
@@ -675,6 +698,7 @@ function solve_poisson_bicgstab!(
         apply_preconditioner!(phat, pvec, mask, grid, alpha, config.preconditioner)
 
         # v = A * phat
+        apply_periodic_pressure_if_needed!(phat, grid, bc_set)
         calc_laplacian_cg!(v, phat, mask, grid, par, alpha)
 
         denom = dot_product_cg(r_hat, v, mask, grid, par)
@@ -704,6 +728,7 @@ function solve_poisson_bicgstab!(
         apply_preconditioner!(shat, r, mask, grid, alpha, config.preconditioner)
 
         # t = A * shat (reuse rhs array)
+        apply_periodic_pressure_if_needed!(shat, grid, bc_set)
         calc_laplacian_cg!(t, shat, mask, grid, par, alpha)
 
         t_dot_s = dot_product_cg(t, r, mask, grid, par)

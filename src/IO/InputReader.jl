@@ -42,6 +42,7 @@ end
 """
 struct SimulationParams
     dry_run::Bool
+    debug::Bool
     start::Symbol         # :initial or :restart
     max_step::Int
     dim_params::DimensionParams
@@ -71,6 +72,9 @@ function parse_tuple2(arr)
 end
 
 function parse_yesno(value, key::String)::Bool
+    if value isa Bool
+        return value
+    end
     if value isa AbstractString
         v = lowercase(String(value))
         if v == "yes"
@@ -97,6 +101,7 @@ function load_parameters(filepath::String)::SimulationParams
 
     # --- Basic Params ---
     dry_run = parse_yesno(get(data, :dry_run, "no"), "dry_run")
+    debug = parse_yesno(get(data, :debug, get(data, :Debug, "no")), "debug")
     start_str = lowercase(String(get(data, :start, "initial")))
     start_mode = if start_str == "initial"
         :initial
@@ -253,7 +258,7 @@ function load_parameters(filepath::String)::SimulationParams
     # パラメータ読み込み時点での不整合があればエラーにする
 
     return SimulationParams(
-        dry_run, start_mode, max_step, dim_params,
+        dry_run, debug, start_mode, max_step, dim_params,
         grid_config, courant_number, intervals,
         poisson_config, time_scheme,
         smagorinsky_constant, div_max_threshold,

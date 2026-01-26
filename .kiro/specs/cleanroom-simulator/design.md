@@ -592,11 +592,9 @@ end
 **Responsibilities & Constraints**
 - 非等間隔格子対応の中心差分
 - 調和平均による界面粘性係数
-- 壁面境界: マスク関数を用いて勾配をゼロにする（Neumann条件）
-- **フラックス補正**: マスク0化に伴う拡散項の過小評価を防ぐため、以下の補正を行う
-  - Wall/SlidingWall: 壁面せん断流束を加算
-  - Inlet: 流入境界値との差分に基づく流束を加算
-- Outflow境界では粘性項をゼロとし、対流項のみで流出条件を与える
+- 壁面境界: マスク関数を用いて勾配寄与をゼロにする（Neumann条件）
+- **フラックス補正**: 指定速度境界（Wall/SlidingWall/Inflow）では壁面せん断流束を加算
+- Outflow境界は特別扱いせず、ゴーストセル値とマスクによって自然に拡散項を評価する
 
 **壁面境界での拡散フラックス処理**
 - 壁面（mask=0）に隣接するセルフェイスでは、速度勾配をゼロとみなす
@@ -685,7 +683,8 @@ end
   - 前処理行列 M ≈ (D + L) D⁻¹ (D + U) の近似逆行列として作用
   - none指定時は前処理を行わない
 - **圧力平均値の引き戻し**: Periodic境界では周期条件、それ以外はNeumann条件のため、圧力場の定数不定性によるドリフトを防ぐ目的で常に平均値を引き戻す
-- 圧力平均値の引き戻しでは mask=0（物体セル）を平均計算から除外し、引き戻し後にマスクを掛けて物体セル圧力を0に固定する
+- 圧力平均値の引き戻しでは mask=0（物体セル）を平均計算から除外し、引き戻し後は物体セルを平均値で埋める
+- CG/BiCGSTABでは周期境界のみ明示適用し、非周期境界はマスクによりNeumann条件が暗黙に成立する
 - 残差は初期残差で正規化（H2方式）して収束判定する
 
 **Dependencies**
@@ -735,7 +734,7 @@ function solve_poisson!(
     # Returns: (収束フラグ, 反復回数, 最終残差)
     # Postconditions:
     #   1. 反復計算（apply_pressure_bcs! をループ内で適宜呼び出し）
-    #   2. 常に平均値を引き戻し（ドリフト防止、p = m * (p - p_avg)）
+    #   2. 常に平均値を引き戻し（ドリフト防止、p = m*(p - p_avg) + (1-m)*p_avg）
     #   3. buffers.p に最終的な圧力場を格納
 end
 
@@ -750,6 +749,7 @@ function apply_pressure_bcs!(
     #   - Periodic: 対向ゴーストセル間で値を交換
     #   - その他（Wall/Symmetric/Inflow/Outflow/Opening）: Neumann条件（∂p/∂n=0）
     #     → ゴーストセルに隣接内部セルの値をコピー
+    # CG/BiCGSTABでは周期境界のみを明示適用し、非周期境界はマスクでNeumann条件が暗黙に成立する
     # 物体セル（mask=0）: ポアソン方程式の離散化で自然にNeumann条件が満たされる
 end
 ```
@@ -768,6 +768,7 @@ end
 - セルフェイスへの内挿（チェッカーボード防止）
 - 発散計算とポアソン右辺生成
 - 速度補正
+- マスク処理は可能な限りif分岐を避け、係数乗算で無効化する
 
 **Dependencies**
 - Inbound: TimeIntegration — ステップ呼び出し (P0)
@@ -798,6 +799,10 @@ function fractional_step!(
     # 6. update_boundary_mask!(mask, grid, bc_set, false)  # マスクを復元
     # 7. correct_velocity!
 end
+
+# 対流流出（Outflow）の更新式はn時刻の値を用いる
+# phi_new = phi_ref - Uc * dt/dn * (phi_ref - phi_ref_inner)
+# u*への適用時もphi_refにはu^nを渡す
 
 # 圧力計算用にInflow/Outflow/Opening境界のマスク値を設定
 function update_boundary_mask!(
@@ -1105,6 +1110,7 @@ function apply_outflow!(
 )
     # 1次風上離散化:
     # φ_new = φ - Uc·Δt·(φ - φ_neighbor)/Δx
+    # NOTE: 擬似速度(u*)への境界適用では、Uc は u^n から計算する
 end
 
 # 境界面平均速度の計算
@@ -1251,6 +1257,7 @@ const InternalBoundary = BoundaryConditions.InternalBoundary
 
 struct SimulationParams
     dry_run::Bool
+    debug::Bool
     start::Symbol         # :initial or :restart
     max_step::Int
     dim_params::DimensionParams
@@ -1269,6 +1276,7 @@ end
 function load_parameters(filepath::String)::SimulationParams
     # JSON解析、検証、安定条件チェック
     # キーワードは小文字へ正規化して照合
+    # debug=true の場合、安定条件違反時に詳細診断ログを出力
     # Errors: 構文エラー、必須パラメータ欠落、安定条件違反
 end
 

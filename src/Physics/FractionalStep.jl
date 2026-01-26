@@ -100,26 +100,18 @@ function compute_divergence!(
     inv_dt = 1.0 / dt
     alpha = mach2 / (dt * dt)
     
-    @inbounds for k in 3:mz-2
+    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+        m0 = buffers.mask[i, j, k]
         dz = grid.dz[k]
-        for j in 3:my-2
-            for i in 3:mx-2
-                if buffers.mask[i, j, k] == 0.0
-                    buffers.rhs[i, j, k] = 0.0
-                    continue
-                end
-                
-                # Div u* = (u*_{i+1/2} - u*_{i-1/2})/dx + ...
-                # u_face_x[i] is left face (i-1/2)?
-                # u_face_x[i+1] is right face (i+1/2).
-                
-                div = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx +
-                      (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy +
-                      (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
-                
-                buffers.rhs[i, j, k] = div * inv_dt - alpha * buffers.p_prev[i, j, k]
-            end
-        end
+        # Div u* = (u*_{i+1/2} - u*_{i-1/2})/dx + ...
+        # u_face_x[i] is left face (i-1/2)?
+        # u_face_x[i+1] is right face (i+1/2).
+        
+        div = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx +
+              (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy +
+              (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+        
+        buffers.rhs[i, j, k] = m0 * (div * inv_dt - alpha * buffers.p_prev[i, j, k])
     end
 end
 
@@ -144,85 +136,50 @@ function correct_velocity!(
     # 1. セルフェイス速度の修正
     # X方向フェイス (i-1/2位置)
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-1
-        # 両側のセルが流体の場合のみ修正
-        m_left = mask[i-1, j, k]
-        m_right = mask[i, j, k]
-        if m_left > 0 && m_right > 0
-            dp_dx = (p[i, j, k] - p[i-1, j, k]) / dx
-            buffers.u_face_x[i, j, k] -= dt * dp_dx
-        else
-            # 壁面の場合はゼロ
-            buffers.u_face_x[i, j, k] = 0.0
-        end
+        dp_dx = (p[i, j, k] - p[i-1, j, k]) / dx * mask[i-1, j, k] * mask[i, j, k]
+        buffers.u_face_x[i, j, k] -= dt * dp_dx
     end
     
     # Y方向フェイス (j-1/2位置)
     @inbounds for k in 3:mz-2, j in 3:my-1, i in 3:mx-2
-        m_left = mask[i, j-1, k]
-        m_right = mask[i, j, k]
-        if m_left > 0 && m_right > 0
-            dp_dy = (p[i, j, k] - p[i, j-1, k]) / dy
-            buffers.v_face_y[i, j, k] -= dt * dp_dy
-        else
-            buffers.v_face_y[i, j, k] = 0.0
-        end
+        dp_dy = (p[i, j, k] - p[i, j-1, k]) / dy * mask[i, j-1, k] * mask[i, j, k]
+        buffers.v_face_y[i, j, k] -= dt * dp_dy
     end
     
     # Z方向フェイス (k-1/2位置)
     @inbounds for k in 3:mz-1, j in 3:my-2, i in 3:mx-2
-        m_left = mask[i, j, k-1]
-        m_right = mask[i, j, k]
-        if m_left > 0 && m_right > 0
-            dz = grid.z_face[k] - grid.z_face[k-1]
-            dp_dz = (p[i, j, k] - p[i, j, k-1]) / dz
-            buffers.w_face_z[i, j, k] -= dt * dp_dz
-        else
-            buffers.w_face_z[i, j, k] = 0.0
-        end
+        dz = grid.z_face[k] - grid.z_face[k-1]
+        dp_dz = (p[i, j, k] - p[i, j, k-1]) / dz * mask[i, j, k-1] * mask[i, j, k]
+        buffers.w_face_z[i, j, k] -= dt * dp_dz
     end
     
     # 2. セルセンター速度の修正（両側フェイスの圧力勾配の平均）
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-        if mask[i, j, k] == 0.0
-            # 壁面セル
-            buffers.u[i, j, k] = 0.0
-            buffers.v[i, j, k] = 0.0
-            buffers.w[i, j, k] = 0.0
-            continue
-        end
-        
         # X方向: 左右フェイスの圧力勾配を平均
-        m_left = mask[i-1, j, k]
-        m_right = mask[i+1, j, k]
-        
+        m0 = mask[i, j, k]
+
         # 左フェイス (i-1/2) の圧力勾配（マスクでNeumann条件）
-        dp_dx_left = m_left * (p[i, j, k] - p[i-1, j, k]) / dx
+        dp_dx_left = m0 * mask[i-1, j, k] * (p[i, j, k] - p[i-1, j, k]) / dx
         # 右フェイス (i+1/2) の圧力勾配
-        dp_dx_right = m_right * (p[i+1, j, k] - p[i, j, k]) / dx
+        dp_dx_right = m0 * mask[i+1, j, k] * (p[i+1, j, k] - p[i, j, k]) / dx
         
         # 平均勾配で修正
         dp_dx_avg = 0.5 * (dp_dx_left + dp_dx_right)
         buffers.u[i, j, k] = buffers.u_star[i, j, k] - dt * dp_dx_avg
         
         # Y方向
-        m_front = mask[i, j-1, k]
-        m_back = mask[i, j+1, k]
-        
-        dp_dy_front = m_front * (p[i, j, k] - p[i, j-1, k]) / dy
-        dp_dy_back = m_back * (p[i, j+1, k] - p[i, j, k]) / dy
+        dp_dy_front = m0 * mask[i, j-1, k] * (p[i, j, k] - p[i, j-1, k]) / dy
+        dp_dy_back = m0 * mask[i, j+1, k] * (p[i, j+1, k] - p[i, j, k]) / dy
         
         dp_dy_avg = 0.5 * (dp_dy_front + dp_dy_back)
         buffers.v[i, j, k] = buffers.v_star[i, j, k] - dt * dp_dy_avg
         
         # Z方向
-        m_bottom = mask[i, j, k-1]
-        m_top = mask[i, j, k+1]
-        
         dz_bottom = grid.z_face[k] - grid.z_face[k-1]
         dz_top = grid.z_face[k+1] - grid.z_face[k]
         
-        dp_dz_bottom = m_bottom * (p[i, j, k] - p[i, j, k-1]) / dz_bottom
-        dp_dz_top = m_top * (p[i, j, k+1] - p[i, j, k]) / dz_top
+        dp_dz_bottom = m0 * mask[i, j, k-1] * (p[i, j, k] - p[i, j, k-1]) / dz_bottom
+        dp_dz_top = m0 * mask[i, j, k+1] * (p[i, j, k+1] - p[i, j, k]) / dz_top
         
         dp_dz_avg = 0.5 * (dp_dz_bottom + dp_dz_top)
         buffers.w[i, j, k] = buffers.w_star[i, j, k] - dt * dp_dz_avg
@@ -252,7 +209,11 @@ function fractional_step!(
     compute_pseudo_velocity!(buffers, grid, dt, bc_set, par)
     
     # 2.5 Apply BCs to Pseudo Velocity
-    apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, buffers.mask, bc_set, dt)
+    apply_velocity_bcs!(
+        buffers.u_star, buffers.v_star, buffers.w_star,
+        grid, buffers.mask, bc_set, dt;
+        u_ref=buffers.u, v_ref=buffers.v, w_ref=buffers.w
+    )
 
     # 3. Interpolate to Faces
     interpolate_to_faces!(buffers, grid, par)
@@ -262,13 +223,13 @@ function fractional_step!(
     compute_divergence!(buffers, grid, dt, poisson_config.mach2, par)
     
     # 5. Poisson Solve
-    # Temporarily set Outflow mask to 0.0 to enforce Neumann pressure BC (dp/dn=0)
+    # Temporarily set Inflow/Outflow/Opening mask to 0.0 to enforce Neumann pressure BC (dp/dn=0)
     update_boundary_mask!(buffers.mask, grid, bc_set, 0.0)
     
     alpha = poisson_config.mach2 / (dt * dt)
     converged, iter, res = solve_poisson!(buffers, grid, poisson_config, bc_set, par, alpha)
     
-    # Restore Outflow mask to 1.0 for Convection/Velocity update
+    # Restore Inflow/Outflow/Opening mask to 1.0 for Convection/Velocity update
     update_boundary_mask!(buffers.mask, grid, bc_set, 1.0)
     
     # 6. Correct Velocity (Face and Center)

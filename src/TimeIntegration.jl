@@ -113,10 +113,17 @@ function projection_step!(
     dt::Float64,
     bc_set::BoundaryConditionSet,
     poisson_config::PoissonConfig,
-    par::String
+    par::String;
+    u_ref::Array{Float64, 3}=buffers.u,
+    v_ref::Array{Float64, 3}=buffers.v,
+    w_ref::Array{Float64, 3}=buffers.w
 )::Tuple{Int, Float64}
     # 0. Apply BCs to u*
-    apply_velocity_bcs!(buffers.u_star, buffers.v_star, buffers.w_star, grid, buffers.mask, bc_set, dt)
+    apply_velocity_bcs!(
+        buffers.u_star, buffers.v_star, buffers.w_star,
+        grid, buffers.mask, bc_set, dt;
+        u_ref=u_ref, v_ref=v_ref, w_ref=w_ref
+    )
 
     # 1. Interpolate to faces
     interpolate_to_faces!(buffers, grid, par)
@@ -188,7 +195,10 @@ function rk2_step!(
     @inbounds @. buffers.w_star = rk_buffers.w_rk1 + dt * buffers.flux_w
     
     # 5. Projection u* -> u^{n+1}
-    iter, res = projection_step!(buffers, grid, dt, bc_set, poisson_config, par)
+    iter, res = projection_step!(
+        buffers, grid, dt, bc_set, poisson_config, par;
+        u_ref=rk_buffers.u_rk1, v_ref=rk_buffers.v_rk1, w_ref=rk_buffers.w_rk1
+    )
     
     return (iter, res)
 end
@@ -250,7 +260,10 @@ function rk4_step!(
     @inbounds @. buffers.w_star = u_n[3] + 0.5 * dt * k1[3]
     
     # Project u1 (inplace to buffers.u)
-    projection_step!(buffers, grid, 0.5*dt, bc_set, poisson_config, par)
+    projection_step!(
+        buffers, grid, 0.5*dt, bc_set, poisson_config, par;
+        u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
+    )
     
     # --- Stage 2 ---
     # Calc k2 = H(u1)
@@ -265,7 +278,10 @@ function rk4_step!(
     @inbounds @. buffers.v_star = u_n[2] + 0.5 * dt * k2[2]
     @inbounds @. buffers.w_star = u_n[3] + 0.5 * dt * k2[3]
     
-    projection_step!(buffers, grid, 0.5*dt, bc_set, poisson_config, par)
+    projection_step!(
+        buffers, grid, 0.5*dt, bc_set, poisson_config, par;
+        u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
+    )
     
     # --- Stage 3 ---
     # Calc k3 = H(u2)
@@ -280,7 +296,10 @@ function rk4_step!(
     @inbounds @. buffers.v_star = u_n[2] + dt * k3[2]
     @inbounds @. buffers.w_star = u_n[3] + dt * k3[3]
     
-    projection_step!(buffers, grid, dt, bc_set, poisson_config, par)
+    projection_step!(
+        buffers, grid, dt, bc_set, poisson_config, par;
+        u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
+    )
     
     # Calc k4 = H(u3)
     # stored in buffers.flux_u/v/w
@@ -295,7 +314,10 @@ function rk4_step!(
     @inbounds @. buffers.w_star = u_n[3] + dt6 * (k1[3] + 2.0*k2[3] + 2.0*k3[3] + buffers.flux_w)
     
     # Final Projection
-    iter, res = projection_step!(buffers, grid, dt, bc_set, poisson_config, par)
+    iter, res = projection_step!(
+        buffers, grid, dt, bc_set, poisson_config, par;
+        u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
+    )
     
     return (iter, res)
 end

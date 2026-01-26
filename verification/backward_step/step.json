@@ -1,5 +1,6 @@
 {
   "dry_run": "no",
+  "debug": "yes",
   "start": "initial",
   "Max_step": 1000,
   "Reference_Length": 0.3,
@@ -32,8 +33,8 @@
     "checkpoint": 500
   },
   "Poisson_parameter": {
-    "solver": "RedBlackSOR",
-    "coef_acceleration": 1.2,
+    "solver": "cg",
+    "coef_acceleration": 1.0,
     "convergence_criteria": 0.001,
     "Iteration_max": 500,
     "on_divergence": "WarnContinue",
