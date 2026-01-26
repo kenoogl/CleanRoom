@@ -228,6 +228,144 @@ function run_simulation(param_file::String)
             log_step!(mon_data, monitor_config; console_io=stdout, history_io=io)
         end
         if sim_params.debug && monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
+            # Inflow/Outflow face flow rates (outward normal positive)
+            flow_xmin = 0.0
+            flow_xmax = 0.0
+            flow_ymin = 0.0
+            flow_ymax = 0.0
+            flow_zmin = 0.0
+            flow_zmax = 0.0
+            flow_xmin_in = 0.0
+            flow_xmax_in = 0.0
+            flow_ymin_in = 0.0
+            flow_ymax_in = 0.0
+            flow_zmin_in = 0.0
+            flow_zmax_in = 0.0
+            flow_xmin_out = 0.0
+            flow_xmax_out = 0.0
+            flow_ymin_out = 0.0
+            flow_ymax_out = 0.0
+            flow_zmin_out = 0.0
+            flow_zmax_out = 0.0
+            un_xmin_min = Inf
+            un_xmin_max = -Inf
+            un_xmax_min = Inf
+            un_xmax_max = -Inf
+            un_ymin_min = Inf
+            un_ymin_max = -Inf
+            un_ymax_min = Inf
+            un_ymax_max = -Inf
+            un_zmin_min = Inf
+            un_zmin_max = -Inf
+            un_zmax_min = Inf
+            un_zmax_max = -Inf
+            x_min_io = bc_set.x_min.velocity_type == Inflow || bc_set.x_min.velocity_type == Outflow
+            x_max_io = bc_set.x_max.velocity_type == Inflow || bc_set.x_max.velocity_type == Outflow
+            y_min_io = bc_set.y_min.velocity_type == Inflow || bc_set.y_min.velocity_type == Outflow
+            y_max_io = bc_set.y_max.velocity_type == Inflow || bc_set.y_max.velocity_type == Outflow
+            z_min_io = bc_set.z_min.velocity_type == Inflow || bc_set.z_min.velocity_type == Outflow
+            z_max_io = bc_set.z_max.velocity_type == Inflow || bc_set.z_max.velocity_type == Outflow
+            if x_min_io
+                @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2
+                    un = -buffers.u_face_x[3, j, k]  # outward normal for x_min
+                    area = grid.dy * grid.dz[k]
+                    flow_xmin += un * area
+                    if un >= 0.0
+                        flow_xmin_out += un * area
+                    else
+                        flow_xmin_in += -un * area
+                    end
+                    un_xmin_min = min(un_xmin_min, un)
+                    un_xmin_max = max(un_xmin_max, un)
+                end
+            end
+            if x_max_io
+                @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2
+                    un = buffers.u_face_x[grid.mx-1, j, k]  # outward normal for x_max
+                    area = grid.dy * grid.dz[k]
+                    flow_xmax += un * area
+                    if un >= 0.0
+                        flow_xmax_out += un * area
+                    else
+                        flow_xmax_in += -un * area
+                    end
+                    un_xmax_min = min(un_xmax_min, un)
+                    un_xmax_max = max(un_xmax_max, un)
+                end
+            end
+            if y_min_io
+                @inbounds for k in 3:grid.mz-2, i in 3:grid.mx-2
+                    un = -buffers.v_face_y[i, 3, k]  # outward normal for y_min
+                    area = grid.dx * grid.dz[k]
+                    flow_ymin += un * area
+                    if un >= 0.0
+                        flow_ymin_out += un * area
+                    else
+                        flow_ymin_in += -un * area
+                    end
+                    un_ymin_min = min(un_ymin_min, un)
+                    un_ymin_max = max(un_ymin_max, un)
+                end
+            end
+            if y_max_io
+                @inbounds for k in 3:grid.mz-2, i in 3:grid.mx-2
+                    un = buffers.v_face_y[i, grid.my-1, k]  # outward normal for y_max
+                    area = grid.dx * grid.dz[k]
+                    flow_ymax += un * area
+                    if un >= 0.0
+                        flow_ymax_out += un * area
+                    else
+                        flow_ymax_in += -un * area
+                    end
+                    un_ymax_min = min(un_ymax_min, un)
+                    un_ymax_max = max(un_ymax_max, un)
+                end
+            end
+            if z_min_io
+                @inbounds for j in 3:grid.my-2, i in 3:grid.mx-2
+                    un = -buffers.w_face_z[i, j, 3]  # outward normal for z_min
+                    area = grid.dx * grid.dy
+                    flow_zmin += un * area
+                    if un >= 0.0
+                        flow_zmin_out += un * area
+                    else
+                        flow_zmin_in += -un * area
+                    end
+                    un_zmin_min = min(un_zmin_min, un)
+                    un_zmin_max = max(un_zmin_max, un)
+                end
+            end
+            if z_max_io
+                @inbounds for j in 3:grid.my-2, i in 3:grid.mx-2
+                    un = buffers.w_face_z[i, j, grid.mz-1]  # outward normal for z_max
+                    area = grid.dx * grid.dy
+                    flow_zmax += un * area
+                    if un >= 0.0
+                        flow_zmax_out += un * area
+                    else
+                        flow_zmax_in += -un * area
+                    end
+                    un_zmax_min = min(un_zmax_min, un)
+                    un_zmax_max = max(un_zmax_max, un)
+                end
+            end
+            xmin_str = x_min_io ? @sprintf("%.4e", flow_xmin) : "N/A"
+            xmax_str = x_max_io ? @sprintf("%.4e", flow_xmax) : "N/A"
+            ymin_str = y_min_io ? @sprintf("%.4e", flow_ymin) : "N/A"
+            ymax_str = y_max_io ? @sprintf("%.4e", flow_ymax) : "N/A"
+            zmin_str = z_min_io ? @sprintf("%.4e", flow_zmin) : "N/A"
+            zmax_str = z_max_io ? @sprintf("%.4e", flow_zmax) : "N/A"
+            println("  Flow (nd, outward+): x_min=$xmin_str x_max=$xmax_str y_min=$ymin_str y_max=$ymax_str z_min=$zmin_str z_max=$zmax_str")
+            println("  FaceFlow split (nd):",
+                    x_min_io ? @sprintf(" x_min[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_xmin_out, flow_xmin_in, un_xmin_min, un_xmin_max) : " x_min[N/A]",
+                    x_max_io ? @sprintf(" x_max[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_xmax_out, flow_xmax_in, un_xmax_min, un_xmax_max) : " x_max[N/A]",
+                    y_min_io ? @sprintf(" y_min[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_ymin_out, flow_ymin_in, un_ymin_min, un_ymin_max) : " y_min[N/A]",
+                    y_max_io ? @sprintf(" y_max[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_ymax_out, flow_ymax_in, un_ymax_min, un_ymax_max) : " y_max[N/A]",
+                    z_min_io ? @sprintf(" z_min[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_zmin_out, flow_zmin_in, un_zmin_min, un_zmin_max) : " z_min[N/A]",
+                    z_max_io ? @sprintf(" z_max[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_zmax_out, flow_zmax_in, un_zmax_min, un_zmax_max) : " z_max[N/A]")
+        end
+
+        if sim_params.debug && monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
             uc = BoundaryConditions.compute_outflow_uc(
                 buffers.u, buffers.v, buffers.w, grid, buffers.mask, bc_set
             )

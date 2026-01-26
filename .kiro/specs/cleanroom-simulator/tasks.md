@@ -87,7 +87,7 @@ Outflow境界の粘性項は特別扱いせず、ゴーストセル値とマス�
 ---
 
 ## Task 7: ポアソンソルバーの仕様準拠
-**Requirements**: 7.1-7.9
+**Requirements**: 7.1-7.12
 
 前処理sweep数とBiCGSTAB実装を仕様に合わせる
 
@@ -95,6 +95,9 @@ Outflow境界の粘性項は特別扱いせず、ゴーストセル値とマス�
 - [x] 7.2: BiCGSTAB法を実装（前処理付き）
 - [x] 7.3: on_divergence設定（WarnContinue/Abort）の動作を実装
 - [x] 7.4: CG/BiCGSTABの前処理オプション（none/sor）を追加し、noneは前処理なしとする
+- [x] 7.5: CG/BiCGSTABをSPD形（A'=-A, b'=-b）で解く
+- [x] 7.6: α=0の特異系でrhs平均値を除去・復元する
+- [x] 7.7: 前処理後に周期境界を明示適用する
 
 ---
 
@@ -149,6 +152,7 @@ Start_time_for_averaging以降のWelford法による時間平均と出力
 - [x] 11.2: 条件違反時の警告・停止処理を実装
 - [x] 11.3: Monitorにcfl_max出力を追加
 - [x] 11.4: dry_run時は警告のみで停止しない挙動を明記・実装
+- [x] 11.5: debug有効時にInflow/Outflow境界面の流量モニタ（正味流量、out/in分離、un最小/最大）を出力
 
 ---
 

@@ -33,6 +33,46 @@ const PRECONDITIONER_SWEEPS = 4
     end
 end
 
+@inline function remove_rhs_mean_if_singular!(
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    alpha::Float64
+)::Float64
+    if alpha != 0.0
+        return 0.0
+    end
+    sum_b = 0.0
+    count = 0.0
+    @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+        m0 = mask[i, j, k]
+        sum_b += rhs[i, j, k] * m0
+        count += m0
+    end
+    if count == 0.0
+        return 0.0
+    end
+    avg_b = sum_b / count
+    @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+        rhs[i, j, k] -= avg_b * mask[i, j, k]
+    end
+    return avg_b
+end
+
+@inline function restore_rhs_mean!(
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    avg_b::Float64
+)
+    if avg_b == 0.0
+        return
+    end
+    @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2, i in 3:grid.mx-2
+        rhs[i, j, k] += avg_b * mask[i, j, k]
+    end
+end
+
 @enum SolverType begin
     RedBlackSOR
     CG
@@ -137,7 +177,7 @@ function solve_poisson_sor!(
     p = buffers.p
     rhs = buffers.rhs
     mask = buffers.mask
-    
+
     iter = 0
     residual = 0.0
     converged = false
@@ -256,6 +296,8 @@ function solve_poisson_cg!(
     p = buffers.p
     rhs = buffers.rhs
     mask = buffers.mask
+
+    rhs_avg = remove_rhs_mean_if_singular!(rhs, mask, grid, helm_alpha)
     
     # Reuse buffers for CG work vectors
     r = buffers.flux_u       # Residual
@@ -267,11 +309,12 @@ function solve_poisson_cg!(
     apply_periodic_pressure_if_needed!(p, grid, bc_set)
     res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, helm_alpha)
     if res0 == 0.0
+        restore_rhs_mean!(rhs, mask, grid, rhs_avg)
         return (true, 0, 0.0)
     end
     
     # 2. Preconditioner: z = M^-1 r (Gauss-Seidel)
-    apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner)
+    apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner, bc_set)
     
     # 3. p = z
     @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
@@ -319,7 +362,7 @@ function solve_poisson_cg!(
         end
         
         # 9. Preconditioner: z = M^-1 r
-        apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner)
+        apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner, bc_set)
         
         # 10. rho_new = r·z
         rho_new = dot_product_cg(r, z, mask, grid, par)
@@ -342,6 +385,8 @@ function solve_poisson_cg!(
     if !isnothing(bc_set)
         apply_pressure_bcs!(p, grid, mask, bc_set)
     end
+
+    restore_rhs_mean!(rhs, mask, grid, rhs_avg)
     
     return (converged, iter, residual)
 end
@@ -350,7 +395,7 @@ end
 """
     calc_laplacian_cg!(Ap, p, mask, grid, par, alpha)
     
-Compute Ap = -∇²p - α p (Helmholtz operator for weak compressibility)
+Compute Ap = +∇²p + α p (SPD operator for weak compressibility)
 """
 function calc_laplacian_cg!(
     Ap::Array{Float64, 3},
@@ -397,8 +442,8 @@ function calc_laplacian_cg!(
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                  cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
             
-            # Ap = A * p = (ss - dd * p)
-            Ap[i, j, k] = (ss - dd * p[i, j, k]) * m0
+            # Ap = (-A) * p = (dd * p - ss)  (SPD form)
+            Ap[i, j, k] = (dd * p[i, j, k] - ss) * m0
         end
     end
 end
@@ -407,7 +452,7 @@ end
 """
     calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
     
-Compute residual r = b - Ap and return ||r||
+Compute residual r = b - Ap and return ||r|| (b is negated for SPD form)
 """
 function calc_residual_cg!(
     r::Array{Float64, 3},
@@ -457,11 +502,11 @@ function calc_residual_cg!(
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                  cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
             
-            b_val = rhs[i, j, k] * vol
+            b_val = -rhs[i, j, k] * vol
             
-            # In SOR: ss - b_val = dd * p  ->  ss - dd * p = b_val
-            # A*p = ss - dd * p, r = b - A*p
-            r_val = (b_val - ss + dd * p[i, j, k]) * m0
+            # Use SPD form: A' = -A, b' = -b
+            # A' * p = dd * p - ss, r = b' - A' * p
+            r_val = (b_val - (dd * p[i, j, k] - ss)) * m0
             r[i, j, k] = r_val
             res_sq += r_val * r_val
         end
@@ -532,7 +577,8 @@ function apply_preconditioner!(
     mask::Array{Float64, 3},
     grid::GridData,
     alpha::Float64,
-    precond::PreconditionerType
+    precond::PreconditionerType,
+    bc_set=nothing
 )
     if precond == PrecondNone
         copyto!(z, r)
@@ -576,6 +622,7 @@ function apply_preconditioner!(
                 end
             end
         end
+        apply_periodic_pressure_if_needed!(z, grid, bc_set)
     end
 end
 
@@ -648,6 +695,8 @@ function solve_poisson_bicgstab!(
     rhs = buffers.rhs
     mask = buffers.mask
 
+    rhs_avg = remove_rhs_mean_if_singular!(rhs, mask, grid, alpha)
+
     # Work vectors (reuse existing buffers)
     r = buffers.flux_u       # residual / s
     r_hat = buffers.p_prev   # shadow residual
@@ -661,6 +710,7 @@ function solve_poisson_bicgstab!(
     apply_periodic_pressure_if_needed!(p, grid, bc_set)
     res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
     if res0 == 0.0
+        restore_rhs_mean!(rhs, mask, grid, rhs_avg)
         return (true, 0, 0.0)
     end
 
@@ -695,7 +745,7 @@ function solve_poisson_bicgstab!(
         end
 
         # phat = M^-1 p
-        apply_preconditioner!(phat, pvec, mask, grid, alpha, config.preconditioner)
+        apply_preconditioner!(phat, pvec, mask, grid, alpha, config.preconditioner, bc_set)
 
         # v = A * phat
         apply_periodic_pressure_if_needed!(phat, grid, bc_set)
@@ -725,7 +775,7 @@ function solve_poisson_bicgstab!(
         end
 
         # shat = M^-1 s
-        apply_preconditioner!(shat, r, mask, grid, alpha, config.preconditioner)
+        apply_preconditioner!(shat, r, mask, grid, alpha, config.preconditioner, bc_set)
 
         # t = A * shat (reuse rhs array)
         apply_periodic_pressure_if_needed!(shat, grid, bc_set)
@@ -766,6 +816,8 @@ function solve_poisson_bicgstab!(
     if !isnothing(bc_set)
         apply_pressure_bcs!(p, grid, mask, bc_set)
     end
+
+    restore_rhs_mean!(rhs, mask, grid, rhs_avg)
 
     return (converged, iter, residual)
 end

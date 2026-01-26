@@ -668,7 +668,7 @@ end
 | Field | Detail |
 |-------|--------|
 | Intent | 圧力ポアソン方程式の反復解法 |
-| Requirements | 7.1, 7.2, 7.3, 7.4, 7.5, 7.6 |
+| Requirements | 7.1-7.12 |
 
 **Responsibilities & Constraints**
 - Red-Black SOR法（必須）
@@ -676,12 +676,15 @@ end
 - 反復ループ内での `apply_pressure_bcs!` 呼び出しによる境界条件（Neumann/Periodic等）のリアルタイム更新
 - 真の残差 $|b - Ax|$ に基づく収束判定
 - CG/BiCGSTABは前処理オプション（none / sor）をサポート
+- CG/BiCGSTABはSPD形（A'=-A, b'=-b）で解く
+- α=0（特異系）の場合はrhs平均値を除去してから解き、解法後に復元する
 - **前処理（sor: 対称Gauss-Seidel）**:
   - 対称Gauss-Seidel前処理: 前進スイープ → 後退スイープを交互に実行
   - `PRECONDITIONER_ITERATION = 4`（ハードコード）: 前進2回 + 後退2回（対称性を保持、Gauss-Seidel 4 sweep）
   - 各スイープでRed-Black順序を使用し並列化可能
   - 前処理行列 M ≈ (D + L) D⁻¹ (D + U) の近似逆行列として作用
   - none指定時は前処理を行わない
+  - 前処理後に周期境界を明示適用する
 - **圧力平均値の引き戻し**: Periodic境界では周期条件、それ以外はNeumann条件のため、圧力場の定数不定性によるドリフトを防ぐ目的で常に平均値を引き戻す
 - 圧力平均値の引き戻しでは mask=0（物体セル）を平均計算から除外し、引き戻し後は物体セルを平均値で埋める
 - CG/BiCGSTABでは周期境界のみ明示適用し、非周期境界はマスクによりNeumann条件が暗黙に成立する
@@ -1423,6 +1426,7 @@ end
 
 **Responsibilities & Constraints**
 - コンソールへのステップ情報表示（タイムステップ、時刻、Umax、CFL、発散、圧力残差）
+- debug有効時はdisplay間隔ごとにInflow/Outflow境界面の流量モニタ（正味流量、out/in分離、un最小/最大）を出力
 - historyファイル（スペース区切りテキスト形式）への記録
 - 発散検出とエラー通知
 - history.txt は固定幅カラムで step, time, Umax, divMax, dU, ItrP, ResP を出力

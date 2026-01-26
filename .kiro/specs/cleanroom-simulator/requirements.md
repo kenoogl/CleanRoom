@@ -311,10 +311,12 @@ $$
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
 5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
 6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 4 sweep）を適用する
-7. The Solver shall 収束後に常に圧力場の空間平均値（流体セルのみ）を計算し、流体セルは平均値を減算してゼロ平均化し、物体セルは平均値で埋める（圧力境界条件の定数不定性によるドリフト防止）
-8. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
-9. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
-10. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor）を選択できる（noneは前処理なし）
+7. The Solver shall CG/BiCGSTABにおいて、解くべき方程式をSPD形（A'=-A, b'=-b）に変換して解く
+8. The Solver shall α=0（ポアソン方程式の特異系）の場合、CG/BiCGSTABの右辺平均値（流体セルのみ）を除去してから解き、解法後に元の平均を復元する
+9. The Solver shall 収束後に常に圧力場の空間平均値（流体セルのみ）を計算し、流体セルは平均値を減算してゼロ平均化し、物体セルは平均値で埋める（圧力境界条件の定数不定性によるドリフト防止）
+10. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
+11. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
+12. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor）を選択できる（noneは前処理なし）
 
 #### 圧力平均値の引き戻し
 
@@ -789,6 +791,10 @@ mean_new = mean_old + (x - mean_old) / n
 ※ 可視化設定（Visualization）はソルバーJSONから除外し、外部可視化設定JSONへ移行する。
 ※ 圧力初期値はJSONで指定しない。指定がなければ **p=0** を初期値とする。
 ※ `debug` が有効な場合、安定条件違反時に詳細な診断ログ（CFL最大位置、U*、RHS、圧力残差など）を出力する。
+※ `debug` が有効な場合、display間隔ごとに Inflow/Outflow 境界面の流量モニタを出力する。  
+  - 外向き正の正味流量  
+  - 流入/流出の分離値（out / in）  
+  - 面法線速度 `un` の最小/最大
 
 #### 時間刻みと安定条件
 
