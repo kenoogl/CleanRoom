@@ -9,10 +9,29 @@ using ..Turbulence
 using ..PressureSolver
 using ..BoundaryConditions
 
-export fractional_step!, interpolate_to_faces!, compute_divergence!, correct_velocity!, compute_pseudo_velocity!
+export fractional_step!, interpolate_to_faces!, compute_divergence!, correct_velocity!, compute_pseudo_velocity!, compute_conv_diff_flux!
 
 """
-    compute_pseudo_velocity!(buffers, grid, dt, par)
+    compute_conv_diff_flux!(buffers, grid, bc_set, par)
+
+対流+拡散のフラックスを計算（buffers.flux_*を更新）。
+"""
+function compute_conv_diff_flux!(
+    buffers::CFDBuffers,
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    par::String
+)
+    fill!(buffers.flux_u, 0.0)
+    fill!(buffers.flux_v, 0.0)
+    fill!(buffers.flux_w, 0.0)
+
+    add_convection_flux!(buffers, grid, bc_set, par)
+    add_diffusion_flux!(buffers, grid, bc_set, par)
+end
+
+"""
+    compute_pseudo_velocity!(buffers, grid, dt, bc_set, par)
 
 擬似速度 u* = u^n + dt * (Convection + Diffusion) を計算。
 """
@@ -23,25 +42,9 @@ function compute_pseudo_velocity!(
     bc_set::BoundaryConditionSet,
     par::String
 )
-    # Initialize flux with 0
-    # Actually add_convection/diffusion add to flux.
-    # So we must clear flux first.
-    fill!(buffers.flux_u, 0.0)
-    fill!(buffers.flux_v, 0.0)
-    fill!(buffers.flux_w, 0.0)
-    
-    # 1. Convection
-    add_convection_flux!(buffers, grid, bc_set, par)
-    
-    # 2. Diffusion
-    add_diffusion_flux!(buffers, grid, bc_set, par)
-    
-    # 3. Update u*
+    compute_conv_diff_flux!(buffers, grid, bc_set, par)
+
     # u* = u + dt * flux
-    # Only update fluid cells?
-    # mask handling implied in fluxes (zero if wall).
-    # so u* at wall = u_wall + dt*0 = u_wall (0).
-    
     @inbounds @. buffers.u_star = buffers.u + dt * buffers.flux_u
     @inbounds @. buffers.v_star = buffers.v + dt * buffers.flux_v
     @inbounds @. buffers.w_star = buffers.w + dt * buffers.flux_w
@@ -80,6 +83,347 @@ function interpolate_to_faces!(
     # u_face_x[3] = 0.5*(u[2] + u[3]). u[2] is ghost.
     # Ghost values should be populated before this step?
     # Yes, BCs applied at end of previous step.
+end
+
+"""
+    apply_outflow_face_star!(buffers, grid, bc_set, dt, u_face_prev, v_face_prev, w_face_prev, reverse_flow_stabilization)
+
+Outflow境界のセルフェイス擬似速度を、セルセンターとセルフェイス値から構成する。
+u*_{i+1/2} = u^n_{i+1/2} - 2 Δt u_c (u^n_{i+1/2} - u^n_i) / Δx
+"""
+function apply_outflow_face_star!(
+    buffers::CFDBuffers,
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    dt::Float64,
+    u_face_prev::Array{Float64, 3},
+    v_face_prev::Array{Float64, 3},
+    w_face_prev::Array{Float64, 3},
+    reverse_flow_stabilization::Bool
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+    u, v, w = buffers.u, buffers.v, buffers.w
+    mask = buffers.mask
+
+    uc = BoundaryConditions.compute_outflow_uc(u, v, w, grid, mask, bc_set)
+    # clip_uc_p: for Max boundaries (outflow is u > 0). Clip if u < 0 (backflow).
+    clip_uc_p(x) = (reverse_flow_stabilization && x < 0.0) ? 0.0 : x
+    # clip_uc_n: for Min boundaries (outflow is u < 0). Clip if u > 0 (backflow). Return speed (positive).
+    clip_uc_n(x) = (reverse_flow_stabilization && x > 0.0) ? 0.0 : -x
+
+    if bc_set.x_max.velocity_type == Outflow
+        i = mx - 2
+        fi = mx - 1
+        uc_face = clip_uc_p(uc.x_max)
+        coeff = 2.0 * dt * uc_face / dx
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            m0 = mask[i, j, k] * mask[fi, j, k]
+            u_face_n = u_face_prev[fi, j, k]
+            buffers.u_face_x[fi, j, k] = m0 * (u_face_n - coeff * (u_face_n - u[i, j, k]))
+        end
+    end
+    if bc_set.x_min.velocity_type == Outflow
+        i = 3
+        fi = 3
+        uc_face = clip_uc_n(uc.x_min)
+        coeff = 2.0 * dt * uc_face / dx
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            m0 = mask[i, j, k] * mask[fi-1, j, k]
+            u_face_n = u_face_prev[fi, j, k]
+            buffers.u_face_x[fi, j, k] = m0 * (u_face_n - coeff * (u_face_n - u[i, j, k]))
+        end
+    end
+
+    if bc_set.y_max.velocity_type == Outflow
+        j = my - 2
+        fj = my - 1
+        uc_face = clip_uc_p(uc.y_max)
+        coeff = 2.0 * dt * uc_face / dy
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, fj, k]
+            v_face_n = v_face_prev[i, fj, k]
+            buffers.v_face_y[i, fj, k] = m0 * (v_face_n - coeff * (v_face_n - v[i, j, k]))
+        end
+    end
+    if bc_set.y_min.velocity_type == Outflow
+        j = 3
+        fj = 3
+        uc_face = clip_uc_n(uc.y_min)
+        coeff = 2.0 * dt * uc_face / dy
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, fj-1, k]
+            v_face_n = v_face_prev[i, fj, k]
+            buffers.v_face_y[i, fj, k] = m0 * (v_face_n - coeff * (v_face_n - v[i, j, k]))
+        end
+    end
+
+    if bc_set.z_max.velocity_type == Outflow
+        k = mz - 2
+        fk = mz - 1
+        dz = grid.z_face[k+1] - grid.z_face[k]
+        uc_face = clip_uc_p(uc.z_max)
+        coeff = 2.0 * dt * uc_face / dz
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, j, fk]
+            w_face_n = w_face_prev[i, j, fk]
+            buffers.w_face_z[i, j, fk] = m0 * (w_face_n - coeff * (w_face_n - w[i, j, k]))
+        end
+    end
+    if bc_set.z_min.velocity_type == Outflow
+        k = 3
+        fk = 3
+        dz = grid.z_face[k+1] - grid.z_face[k]
+        uc_face = clip_uc_n(uc.z_min)
+        coeff = 2.0 * dt * uc_face / dz
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, j, fk-1]
+            w_face_n = w_face_prev[i, j, fk]
+            buffers.w_face_z[i, j, fk] = m0 * (w_face_n - coeff * (w_face_n - w[i, j, k]))
+        end
+    end
+
+    # Openings (outlet patches)
+    for op in bc_set.openings
+        if op.flow_type != OpeningOutlet || !any(isnan, op.velocity)
+            continue
+        end
+        face = op.boundary
+        region_check = (i, j, k) -> BoundaryConditions.is_in_opening(op, grid, i, j, k)
+        uc_region = BoundaryConditions.compute_region_average_velocity(u, v, w, grid, face, region_check)
+        uc_region = clip_uc(uc_region)
+
+        if face == :x_max
+            i = mx - 2
+            fi = mx - 1
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[fi, j, k]
+                    u_face_n = u_face_prev[fi, j, k]
+                    buffers.u_face_x[fi, j, k] = m0 * (u_face_n - 2.0 * dt * uc_region * (u_face_n - u[i, j, k]) / dx)
+                end
+            end
+        elseif face == :x_min
+            i = 3
+            fi = 3
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[fi-1, j, k]
+                    u_face_n = u_face_prev[fi, j, k]
+                    buffers.u_face_x[fi, j, k] = m0 * (u_face_n - 2.0 * dt * uc_region * (u_face_n - u[i, j, k]) / dx)
+                end
+            end
+        elseif face == :y_max
+            j = my - 2
+            fj = my - 1
+            @inbounds for k in 3:mz-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, fj, k]
+                    v_face_n = v_face_prev[i, fj, k]
+                    buffers.v_face_y[i, fj, k] = m0 * (v_face_n - 2.0 * dt * uc_region * (v_face_n - v[i, j, k]) / dy)
+                end
+            end
+        elseif face == :y_min
+            j = 3
+            fj = 3
+            @inbounds for k in 3:mz-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, fj-1, k]
+                    v_face_n = v_face_prev[i, fj, k]
+                    buffers.v_face_y[i, fj, k] = m0 * (v_face_n - 2.0 * dt * uc_region * (v_face_n - v[i, j, k]) / dy)
+                end
+            end
+        elseif face == :z_max
+            k = mz - 2
+            fk = mz - 1
+            @inbounds for j in 3:my-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, j, fk]
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    w_face_n = w_face_prev[i, j, fk]
+                    buffers.w_face_z[i, j, fk] = m0 * (w_face_n - 2.0 * dt * uc_region * (w_face_n - w[i, j, k]) / dz)
+                end
+            end
+        elseif face == :z_min
+            k = 3
+            fk = 3
+            @inbounds for j in 3:my-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, j, fk-1]
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    w_face_n = w_face_prev[i, j, fk]
+                    buffers.w_face_z[i, j, fk] = m0 * (w_face_n - 2.0 * dt * uc_region * (w_face_n - w[i, j, k]) / dz)
+                end
+            end
+        end
+    end
+end
+
+"""
+    enforce_outflow_face_continuity!(buffers, grid, bc_set)
+
+Outflow境界のセルフェイス速度を連続の式から決定する。
+"""
+function enforce_outflow_face_continuity!(
+    buffers::CFDBuffers,
+    grid::GridData,
+    bc_set::BoundaryConditionSet
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+    mask = buffers.mask
+
+    if bc_set.x_max.velocity_type == Outflow
+        i = mx - 2
+        fi = mx - 1
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            m0 = mask[i, j, k] * mask[fi, j, k]
+            dz = grid.z_face[k+1] - grid.z_face[k]
+            term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+            term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+            buffers.u_face_x[fi, j, k] = m0 * (buffers.u_face_x[i, j, k] - dx * (term_y + term_z))
+        end
+    end
+    if bc_set.x_min.velocity_type == Outflow
+        i = 3
+        fi = 3
+        @inbounds for k in 3:mz-2, j in 3:my-2
+            m0 = mask[i, j, k] * mask[fi-1, j, k]
+            dz = grid.z_face[k+1] - grid.z_face[k]
+            term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+            term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+            buffers.u_face_x[fi, j, k] = m0 * (buffers.u_face_x[i+1, j, k] + dx * (term_y + term_z))
+        end
+    end
+
+    if bc_set.y_max.velocity_type == Outflow
+        j = my - 2
+        fj = my - 1
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, fj, k]
+            dz = grid.z_face[k+1] - grid.z_face[k]
+            term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+            term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+            buffers.v_face_y[i, fj, k] = m0 * (buffers.v_face_y[i, j, k] - dy * (term_x + term_z))
+        end
+    end
+    if bc_set.y_min.velocity_type == Outflow
+        j = 3
+        fj = 3
+        @inbounds for k in 3:mz-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, fj-1, k]
+            dz = grid.z_face[k+1] - grid.z_face[k]
+            term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+            term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+            buffers.v_face_y[i, fj, k] = m0 * (buffers.v_face_y[i, j+1, k] + dy * (term_x + term_z))
+        end
+    end
+
+    if bc_set.z_max.velocity_type == Outflow
+        k = mz - 2
+        fk = mz - 1
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, j, fk]
+            term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+            term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+            dz = grid.z_face[k+1] - grid.z_face[k]
+            buffers.w_face_z[i, j, fk] = m0 * (buffers.w_face_z[i, j, k] - dz * (term_x + term_y))
+        end
+    end
+    if bc_set.z_min.velocity_type == Outflow
+        k = 3
+        fk = 3
+        @inbounds for j in 3:my-2, i in 3:mx-2
+            m0 = mask[i, j, k] * mask[i, j, fk-1]
+            term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+            term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+            dz = grid.z_face[k+1] - grid.z_face[k]
+            buffers.w_face_z[i, j, fk] = m0 * (buffers.w_face_z[i, j, k+1] + dz * (term_x + term_y))
+        end
+    end
+
+    # Openings (outlet patches)
+    for op in bc_set.openings
+        if op.flow_type != OpeningOutlet || !any(isnan, op.velocity)
+            continue
+        end
+        face = op.boundary
+        region_check = (i, j, k) -> BoundaryConditions.is_in_opening(op, grid, i, j, k)
+
+        if face == :x_max
+            i = mx - 2
+            fi = mx - 1
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[fi, j, k]
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+                    term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+                    buffers.u_face_x[fi, j, k] = m0 * (buffers.u_face_x[i, j, k] - dx * (term_y + term_z))
+                end
+            end
+        elseif face == :x_min
+            i = 3
+            fi = 3
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[fi-1, j, k]
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+                    term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+                    buffers.u_face_x[fi, j, k] = m0 * (buffers.u_face_x[i+1, j, k] + dx * (term_y + term_z))
+                end
+            end
+        elseif face == :y_max
+            j = my - 2
+            fj = my - 1
+            @inbounds for k in 3:mz-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, fj, k]
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+                    term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+                    buffers.v_face_y[i, fj, k] = m0 * (buffers.v_face_y[i, j, k] - dy * (term_x + term_z))
+                end
+            end
+        elseif face == :y_min
+            j = 3
+            fj = 3
+            @inbounds for k in 3:mz-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, fj-1, k]
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+                    term_z = (buffers.w_face_z[i, j, k+1] - buffers.w_face_z[i, j, k]) / dz
+                    buffers.v_face_y[i, fj, k] = m0 * (buffers.v_face_y[i, j+1, k] + dy * (term_x + term_z))
+                end
+            end
+        elseif face == :z_max
+            k = mz - 2
+            fk = mz - 1
+            @inbounds for j in 3:my-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, j, fk]
+                    term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+                    term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    buffers.w_face_z[i, j, fk] = m0 * (buffers.w_face_z[i, j, k] - dz * (term_x + term_y))
+                end
+            end
+        elseif face == :z_min
+            k = 3
+            fk = 3
+            @inbounds for j in 3:my-2, i in 3:mx-2
+                if region_check(i, j, k)
+                    m0 = mask[i, j, k] * mask[i, j, fk-1]
+                    term_x = (buffers.u_face_x[i+1, j, k] - buffers.u_face_x[i, j, k]) / dx
+                    term_y = (buffers.v_face_y[i, j+1, k] - buffers.v_face_y[i, j, k]) / dy
+                    dz = grid.z_face[k+1] - grid.z_face[k]
+                    buffers.w_face_z[i, j, fk] = m0 * (buffers.w_face_z[i, j, k+1] + dz * (term_x + term_y))
+                end
+            end
+        end
+    end
 end
 
 """
@@ -187,7 +531,7 @@ function correct_velocity!(
 end
 
 """
-    fractional_step!(buffers, grid, dt, bc_set, poisson_config, Cs, par)
+    fractional_step!(buffers, grid, dt, bc_set, poisson_config, Cs, nu, reverse_flow_stabilization, par)
 
 統合ステップ関数。
 """
@@ -199,26 +543,37 @@ function fractional_step!(
     poisson_config::PoissonConfig,
     Cs::Float64,
     nu::Float64,
+    reverse_flow_stabilization::Bool,
     par::String
 )::Tuple{Int, Float64}
 
     # 1. Update Turbulence (nu_t)
-    compute_turbulent_viscosity!(buffers.nu_t, buffers, grid, Cs, nu, par)
+    compute_turbulent_viscosity!(buffers, grid, Cs, nu, par)
     
     # 2. Pseudo Velocity
     compute_pseudo_velocity!(buffers, grid, dt, bc_set, par)
     
     # 2.5 Apply BCs to Pseudo Velocity
-    apply_velocity_bcs!(
+    apply_velocity_cc_bcs!(
         buffers.u_star, buffers.v_star, buffers.w_star,
         grid, buffers.mask, bc_set, dt;
-        u_ref=buffers.u, v_ref=buffers.v, w_ref=buffers.w
+        u_ref=buffers.u, v_ref=buffers.v, w_ref=buffers.w,
+        reverse_flow_stabilization=reverse_flow_stabilization
     )
 
     # 3. Interpolate to Faces
+    copyto!(buffers.flux_u, buffers.u_face_x)
+    copyto!(buffers.flux_v, buffers.v_face_y)
+    copyto!(buffers.flux_w, buffers.w_face_z)
     interpolate_to_faces!(buffers, grid, par)
+
+    apply_outflow_face_star!(
+        buffers, grid, bc_set, dt,
+        buffers.flux_u, buffers.flux_v, buffers.flux_w,
+        reverse_flow_stabilization
+    )
     
-    # 4. Divergence / RHS
+    # 4. Divergence / RHS , copy from p to p_prev
     copyto!(buffers.p_prev, buffers.p)
     compute_divergence!(buffers, grid, dt, poisson_config.mach2, par)
     
@@ -237,15 +592,15 @@ function fractional_step!(
     
     # 7. Apply BCs to Face Velocities
     # セルフェイス速度への境界条件適用（周期境界、対称境界など）
-    apply_face_velocity_bcs!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, buffers.mask, bc_set, dt)
+    apply_velocity_cf_bcs!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, buffers.mask, bc_set, dt)
+    enforce_outflow_face_continuity!(buffers, grid, bc_set)
     
     # 8. Apply BCs to Center Velocities
-    apply_boundary_conditions!(buffers, grid, bc_set, dt, par)
-    
-    # 9. Update Time Average (Should be called by Main? Or here?)
-    # Design flow says "Update Time Average" is last step of FracStep flow.
-    # But usually caller manages averaging start time.
-    # I'll leave it to Main because it depends on Time.
+    apply_velocity_cc_bcs!(
+        buffers.u, buffers.v, buffers.w,
+        grid, buffers.mask, bc_set, dt;
+        reverse_flow_stabilization=reverse_flow_stabilization
+    )
     
     return (iter, res)
 end

@@ -4,7 +4,7 @@ using ..Common
 using ..Grid
 
 export CFDBuffers, KrylovBuffers, RKBuffers
-export update_time_average!, estimate_memory_size, check_memory_availability, allocate_rk_buffers
+export update_time_average!, estimate_memory_size, check_memory_availability, allocate_rk_buffers, initialize_fields!
 
 """
     CFDBuffers
@@ -149,6 +149,40 @@ function CFDBuffers(mx::Int, my::Int, mz::Int)
         zeros_3d(), zeros_3d(),             # nu_t, nu_eff
         zeros_3d(), zeros_3d(), zeros_3d()  # u_face...
     )
+end
+
+"""
+    initialize_fields!(buffers, grid, u0, v0, w0, p0)
+
+初期場の設定（変数への代入、マスク適用）。
+"""
+function initialize_fields!(
+    buffers::CFDBuffers,
+    grid::GridData,
+    u0::Float64, v0::Float64, w0::Float64, p0::Float64
+)
+    @inbounds for k in 1:grid.mz, j in 1:grid.my, i in 1:grid.mx
+        m = buffers.mask[i, j, k]
+        buffers.u[i, j, k] = u0 * m
+        buffers.v[i, j, k] = v0 * m
+        buffers.w[i, j, k] = w0 * m
+        buffers.p[i, j, k] = p0 * m
+        buffers.u_face_x[i, j, k] = 0.0
+        buffers.v_face_y[i, j, k] = 0.0
+        buffers.w_face_z[i, j, k] = 0.0
+    end
+    @inbounds for k in 1:grid.mz, j in 1:grid.my, i in 2:grid.mx
+        m_face = buffers.mask[i-1, j, k] * buffers.mask[i, j, k]
+        buffers.u_face_x[i, j, k] = u0 * m_face
+    end
+    @inbounds for k in 1:grid.mz, j in 2:grid.my, i in 1:grid.mx
+        m_face = buffers.mask[i, j-1, k] * buffers.mask[i, j, k]
+        buffers.v_face_y[i, j, k] = v0 * m_face
+    end
+    @inbounds for k in 2:grid.mz, j in 1:grid.my, i in 1:grid.mx
+        m_face = buffers.mask[i, j, k-1] * buffers.mask[i, j, k]
+        buffers.w_face_z[i, j, k] = w0 * m_face
+    end
 end
 
 """

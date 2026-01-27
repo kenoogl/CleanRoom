@@ -6,9 +6,9 @@ using ..Fields
 
 export VelocityBCType, ExternalBC, Opening, OpeningFlowType, InternalBoundary, BoundaryConditionSet
 export Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow 
-export apply_boundary_conditions!, apply_outflow!, apply_velocity_bcs!
-export apply_periodic_velocity!, apply_periodic_pressure!, apply_periodic_face_velocity!
-export apply_face_velocity_bcs!, apply_boundary_mask!, apply_internal_boundary_mask!, apply_pressure_bcs!
+export apply_outflow!, apply_velocity_cc_bcs!
+export apply_periodic_velocity_cc!, apply_periodic_pressure!, apply_periodic_velocity_cf!
+export apply_velocity_cf_bcs!, apply_boundary_mask!, apply_internal_boundary_mask!, apply_pressure_bcs!
 export apply_outflow_region!, update_boundary_mask!
 
 @enum VelocityBCType begin
@@ -668,11 +668,11 @@ end
 
 
 """
-    apply_periodic_velocity!(u, v, w, grid, axis)
+    apply_periodic_velocity_cc!(u, v, w, grid, axis)
 
 速度成分の周期境界条件を適用する。
 """
-function apply_periodic_velocity!(
+function apply_periodic_velocity_cc!(
     u::Array{Float64, 3},
     v::Array{Float64, 3},
     w::Array{Float64, 3},
@@ -790,11 +790,14 @@ end
 end
 
 """
-    apply_velocity_bcs!(u, v, w, grid, mask, bc_set, dt; u_ref=u, v_ref=v, w_ref=w, Uc=compute_outflow_uc(u_ref, v_ref, w_ref, grid, mask, bc_set))
+    apply_velocity_cc_bcs!(u, v, w, grid, mask, bc_set, dt;
+                           u_ref=u, v_ref=v, w_ref=w,
+                           Uc=compute_outflow_uc(u_ref, v_ref, w_ref, grid, mask, bc_set),
+                           reverse_flow_stabilization=false)
 
 指定された速度場(u, v, w)に対して境界条件を適用する。
 """
-function apply_velocity_bcs!(
+function apply_velocity_cc_bcs!(
     u::Array{Float64, 3},
     v::Array{Float64, 3},
     w::Array{Float64, 3},
@@ -805,8 +808,14 @@ function apply_velocity_bcs!(
     u_ref::Array{Float64, 3}=u,
     v_ref::Array{Float64, 3}=v,
     w_ref::Array{Float64, 3}=w,
-    Uc=compute_outflow_uc(u_ref, v_ref, w_ref, grid, mask, bc_set)
+    Uc=compute_outflow_uc(u_ref, v_ref, w_ref, grid, mask, bc_set),
+    reverse_flow_stabilization::Bool=false
 )
+    clip_uc(face::Symbol, uc::Float64) = reverse_flow_stabilization ? (
+        (face == :x_max || face == :y_max || face == :z_max) ? (uc < 0.0 ? 0.0 : uc) :
+        (uc > 0.0 ? 0.0 : uc)
+    ) : uc
+
     # 1. External Boundaries
     function apply_ext(bc, face)
         if bc.velocity_type == Inflow
@@ -814,7 +823,7 @@ function apply_velocity_bcs!(
              set_boundary_value!(v, grid, mask, face, bc.velocity_value[2], :dirichlet)
              set_boundary_value!(w, grid, mask, face, bc.velocity_value[3], :dirichlet)
         elseif bc.velocity_type == Outflow
-             uc_face = face_uc(Uc, face)
+             uc_face = clip_uc(face, face_uc(Uc, face))
              apply_outflow!(u, grid, face, dt, uc_face; phi_ref=u_ref)
              apply_outflow!(v, grid, face, dt, uc_face; phi_ref=v_ref)
              apply_outflow!(w, grid, face, dt, uc_face; phi_ref=w_ref)
@@ -846,21 +855,21 @@ function apply_velocity_bcs!(
     end
     
     if y_periodic
-        apply_periodic_velocity!(u, v, w, grid, :y)
+        apply_periodic_velocity_cc!(u, v, w, grid, :y)
     else
         apply_ext(bc_set.y_min, :y_min)
         apply_ext(bc_set.y_max, :y_max)
     end
     
     if x_periodic
-        apply_periodic_velocity!(u, v, w, grid, :x)
+        apply_periodic_velocity_cc!(u, v, w, grid, :x)
     else
         apply_ext(bc_set.x_min, :x_min)
         apply_ext(bc_set.x_max, :x_max)
     end
     
     if z_periodic
-        apply_periodic_velocity!(u, v, w, grid, :z)
+        apply_periodic_velocity_cc!(u, v, w, grid, :z)
     else
         apply_ext(bc_set.z_min, :z_min)
         apply_ext(bc_set.z_max, :z_max)
@@ -885,6 +894,7 @@ function apply_velocity_bcs!(
         elseif op.flow_type == OpeningOutlet
             if any(isnan, op.velocity)
                 uc_region = compute_region_average_velocity(u_ref, v_ref, w_ref, grid, face, region_check)
+                uc_region = clip_uc(face, uc_region)
                 apply_outflow_region!(u, grid, face, dt, uc_region, region_check; phi_ref=u_ref)
                 apply_outflow_region!(v, grid, face, dt, uc_region, region_check; phi_ref=v_ref)
                 apply_outflow_region!(w, grid, face, dt, uc_region, region_check; phi_ref=w_ref)
@@ -911,21 +921,6 @@ function apply_velocity_bcs!(
             end
         end
     end
-end
-
-function apply_boundary_conditions!(
-    buffers::CFDBuffers,
-    grid::GridData,
-    bc_set::BoundaryConditionSet,
-    dt::Float64,
-    par::String
-)
-    # Apply Velocity BCs
-    apply_velocity_bcs!(buffers.u, buffers.v, buffers.w, grid, buffers.mask, bc_set, dt)
-
-    # Apply Pressure BCs (Neumann / Periodic)
-    apply_pressure_bcs!(buffers.p, grid, buffers.mask, bc_set)
-    apply_internal_pressure_bcs!(buffers.p, grid, bc_set)
 end
 
 function apply_pressure_bcs!(
@@ -995,12 +990,12 @@ function apply_periodic_pressure!(
 end
 
 """
-    apply_periodic_face_velocity!(u_face, v_face, w_face, grid, axis)
+    apply_periodic_velocity_cf!(u_face, v_face, w_face, grid, axis)
 
 セルフェイス速度の周期境界条件を適用する。
 セルフェイス速度はインデックスがセルセンターと異なるため専用の処理が必要。
 """
-function apply_periodic_face_velocity!(
+function apply_periodic_velocity_cf!(
     u_face::Array{Float64, 3},
     v_face::Array{Float64, 3},
     w_face::Array{Float64, 3},
@@ -1164,11 +1159,11 @@ function apply_symmetric_face_bc!(
 end
 
 """
-    apply_face_velocity_bcs!(u_f, v_f, w_f, grid, mask, bc_set, dt)
+    apply_velocity_cf_bcs!(u_f, v_f, w_f, grid, mask, bc_set, dt)
 
 セルフェイス速度の境界条件を一括適用する。
 """
-function apply_face_velocity_bcs!(
+function apply_velocity_cf_bcs!(
     u_f::Array{Float64, 3},
     v_f::Array{Float64, 3},
     w_f::Array{Float64, 3},
@@ -1199,21 +1194,21 @@ function apply_face_velocity_bcs!(
     z_periodic = bc_set.z_min.velocity_type == Periodic && bc_set.z_max.velocity_type == Periodic
 
     if x_periodic
-        apply_periodic_face_velocity!(u_f, v_f, w_f, grid, :x)
+        apply_periodic_velocity_cf!(u_f, v_f, w_f, grid, :x)
     else
         apply_ext_face(bc_set.x_min, :x_min)
         apply_ext_face(bc_set.x_max, :x_max)
     end
 
     if y_periodic
-        apply_periodic_face_velocity!(u_f, v_f, w_f, grid, :y)
+        apply_periodic_velocity_cf!(u_f, v_f, w_f, grid, :y)
     else
         apply_ext_face(bc_set.y_min, :y_min)
         apply_ext_face(bc_set.y_max, :y_max)
     end
 
     if z_periodic
-        apply_periodic_face_velocity!(u_f, v_f, w_f, grid, :z)
+        apply_periodic_velocity_cf!(u_f, v_f, w_f, grid, :z)
     else
         apply_ext_face(bc_set.z_min, :z_min)
         apply_ext_face(bc_set.z_max, :z_max)

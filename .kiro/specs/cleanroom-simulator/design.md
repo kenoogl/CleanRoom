@@ -527,7 +527,7 @@ end
 - フラックス計算時: `u_neighbor = u_neighbor * mask_neighbor`
 - これにより壁面での対流フラックスが自動的に粘着条件を満たす
 - **Inlet/Outflow**: 対流計算時に `mask=1.0` を維持するため、WENO3スキームによってゴーストセル値を用いた自然な流束計算が行われる
-- **逆流安定化**: `Outflow` において速度ベクトルが領域内に向いている（逆流）場合、フラックスをゼロにクリップして数値的不安定性を防止する
+- **逆流安定化**: `Outflow` において速度ベクトルが領域内に向いている（逆流）場合、境界条件適用時の対流流出速度 `Uc` をゼロにクリップして数値的不安定性を防止する
 
 **Dependencies**
 - Inbound: FractionalStep — フラックス計算呼び出し (P0)
@@ -769,9 +769,12 @@ end
 **Responsibilities & Constraints**
 - 擬似速度のセルセンター計算
 - セルフェイスへの内挿（チェッカーボード防止）
+- Outflow境界のセルフェイス擬似速度を保存的に再構成する
 - 発散計算とポアソン右辺生成
 - 速度補正
+- 圧力境界条件は solve_poisson! 内の反復で適用し、fractional_step! 末尾では再適用しない
 - マスク処理は可能な限りif分岐を避け、係数乗算で無効化する
+- 初期条件としてセルフェイス速度をセルセンター値から内挿して初期化する
 
 **Dependencies**
 - Inbound: TimeIntegration — ステップ呼び出し (P0)
@@ -796,16 +799,69 @@ function fractional_step!(
     # Flow:
     # 1. compute_pseudo_velocity!
     # 2. interpolate_to_faces!
-    # 3. compute_divergence!
-    # 4. update_boundary_mask!(mask, grid, bc_set, true)   # 圧力計算用にマスク変更
-    # 5. solve_poisson!
-    # 6. update_boundary_mask!(mask, grid, bc_set, false)  # マスクを復元
-    # 7. correct_velocity!
+    # 3. apply_outflow_face_star!       # Outflow境界のセルフェイスu*を更新（u_face^nを状態量として使用）
+    # 4. compute_divergence!
+    # 5. update_boundary_mask!(mask, grid, bc_set, true)   # 圧力計算用にマスク変更
+    # 6. solve_poisson!
+    # 7. update_boundary_mask!(mask, grid, bc_set, false)  # マスクを復元
+    # 8. correct_velocity!
+    # 9. apply_velocity_cf_bcs!
+    # 10. enforce_outflow_face_continuity!
+    # 11. apply_velocity_cc_bcs!
+end
+
+# 対流+拡散フラックスは共通関数で計算し、FractionalStepとTimeIntegrationで共有する
+function compute_conv_diff_flux!(
+    buffers::CFDBuffers,
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    par::String
+)
+    # buffers.flux_u/v/w を0初期化し、対流・拡散フラックスを加算
 end
 
 # 対流流出（Outflow）の更新式はn時刻の値を用いる
 # phi_new = phi_ref - Uc * dt/dn * (phi_ref - phi_ref_inner)
 # u*への適用時もphi_refにはu^nを渡す
+#
+# Outflow境界のセルフェイス擬似速度（例: x_max面の法線成分）
+# u*_{i+1/2} = u^n_{i+1/2} - 2 Δt Uc (u^n_{i+1/2} - u^n_i) / Δx
+# （u^n_{i+1/2} は前時刻のセルフェイス速度を保持する状態量）
+# 非等間隔格子では中心-フェイス距離（Δx/2 等）の局所値を用いる。
+# reverse_flow_stabilization 有効時は「外向きが正」の規約に従い、逆流方向の Uc をゼロクリップする（min面とmax面で判定符号が異なる）。
+#
+# 速度補正後、Outflow境界のセルフェイス速度は連続式から決定:
+# u^{n+1}_{i+1/2} = u^{n+1}_{i-1/2} - Δx * ( (v^{n+1}_{j+1/2}-v^{n+1}_{j-1/2})/Δy + (w^{n+1}_{k+1/2}-w^{n+1}_{k-1/2})/Δz )
+# Opening outlet も同様に適用する。
+
+##### 擬似コード（Outflowフェイス更新と連続式補正）
+
+```
+# 前提: u_face_x, v_face_y, w_face_z は前時刻値を保持する
+# 1) 擬似速度のフェイス更新（outflow面のみ）
+for face in outflow_faces
+  Uc = face_average_velocity(u^n, v^n, w^n, face)
+  if reverse_flow_stabilization && is_backflow(face, Uc)
+    Uc = 0
+  end
+  for each boundary-adjacent cell (i,j,k) on face
+    u_face_n = u_face_x[i+1/2]^n  # 直前時刻のセルフェイス値
+    u_face_x[i+1/2]^* = u_face_n - 2*dt*Uc*(u_face_n - u_i^n)/dx_local
+  end
+end
+
+# 2) Poisson rhs をセルフェイス速度で評価（div(u*)）
+
+# 3) 圧力補正後、境界フェイスの法線成分を連続式で再構成
+for face in outflow_faces
+  for each boundary-adjacent cell (i,j,k) on face
+    u_face_x[i+1/2]^{n+1} =
+      u_face_x[i-1/2]^{n+1}
+      - dx_local * ( (v_face_y[i, j+1/2]^{n+1} - v_face_y[i, j-1/2]^{n+1})/dy_local
+                    + (w_face_z[i, j, k+1/2]^{n+1} - w_face_z[i, j, k-1/2]^{n+1})/dz_local )
+  end
+end
+```
 
 # 圧力計算用にInflow/Outflow/Opening境界のマスク値を設定
 function update_boundary_mask!(

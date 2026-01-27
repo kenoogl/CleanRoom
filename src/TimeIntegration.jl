@@ -8,7 +8,8 @@ using ..PressureSolver
 using ..Turbulence
 using ..Convection
 using ..Diffusion
-using ..FractionalStep: interpolate_to_faces!, compute_divergence!, correct_velocity!, compute_pseudo_velocity!, fractional_step!
+using ..FractionalStep: interpolate_to_faces!, compute_divergence!, correct_velocity!, 
+        compute_pseudo_velocity!, compute_conv_diff_flux!, fractional_step!, apply_outflow_face_star!, enforce_outflow_face_continuity!
 
 export TimeScheme, TimeConfig, advance!, compute_dt
 export Euler, RK2, RK4
@@ -47,10 +48,8 @@ function compute_dt(
         w_max = max(w_max, abs(buffers.w[i]))
     end
     
-    U_max = sqrt(u_max^2 + v_max^2 + w_max^2)
-    # Use max(U_max, 1.0) to ensure stable time step at initialization
-    # U*_ref = max(U*_max, 1.0) where 1.0 is the non-dimensional reference velocity
-    U_ref = max(U_max, 1.0)
+    # U_ref = max(u_max, v_max, w_max, 1.0) where 1.0 is the non-dimensional reference velocity
+    U_ref = max(u_max, v_max, w_max, 1.0)
     
     dx_min = min(grid.dx, grid.dy)
     if !isempty(grid.dz)
@@ -92,16 +91,10 @@ function compute_flux!(
     par::String
 )
     # 1. Update Turbulence (nu_t depends on current Velocity u)
-    compute_turbulent_viscosity!(buffers.nu_t, buffers, grid, Cs, nu, par)
+    compute_turbulent_viscosity!(buffers, grid, Cs, nu, par)
     
-    # 2. Clear Flux
-    fill!(buffers.flux_u, 0.0)
-    fill!(buffers.flux_v, 0.0)
-    fill!(buffers.flux_w, 0.0)
-    
-    # 3. Add Convection & Diffusion
-    add_convection_flux!(buffers, grid, bc_set, par)
-    add_diffusion_flux!(buffers, grid, bc_set, par)
+    # 2. Convection & Diffusion
+    compute_conv_diff_flux!(buffers, grid, bc_set, par)
     
     # buffers.flux_u/v/w now holds H(u)
 end
@@ -113,20 +106,26 @@ function projection_step!(
     dt::Float64,
     bc_set::BoundaryConditionSet,
     poisson_config::PoissonConfig,
-    par::String;
+    par::String,
+    reverse_flow_stabilization::Bool;
     u_ref::Array{Float64, 3}=buffers.u,
     v_ref::Array{Float64, 3}=buffers.v,
     w_ref::Array{Float64, 3}=buffers.w
 )::Tuple{Int, Float64}
     # 0. Apply BCs to u*
-    apply_velocity_bcs!(
+    apply_velocity_cc_bcs!(
         buffers.u_star, buffers.v_star, buffers.w_star,
         grid, buffers.mask, bc_set, dt;
-        u_ref=u_ref, v_ref=v_ref, w_ref=w_ref
+        u_ref=u_ref, v_ref=v_ref, w_ref=w_ref,
+        reverse_flow_stabilization=reverse_flow_stabilization
     )
 
     # 1. Interpolate to faces
+    copyto!(buffers.flux_u, buffers.u_face_x)
+    copyto!(buffers.flux_v, buffers.v_face_y)
+    copyto!(buffers.flux_w, buffers.w_face_z)
     interpolate_to_faces!(buffers, grid, par)
+    apply_outflow_face_star!(buffers, grid, bc_set, dt, buffers.flux_u, buffers.flux_v, buffers.flux_w, reverse_flow_stabilization)
     
     # 2. Divergence
     copyto!(buffers.p_prev, buffers.p)
@@ -140,7 +139,13 @@ function projection_step!(
     correct_velocity!(buffers, grid, dt, par)
     
     # 5. Apply BCs
-    apply_boundary_conditions!(buffers, grid, bc_set, dt, par)
+    apply_velocity_cf_bcs!(buffers.u_face_x, buffers.v_face_y, buffers.w_face_z, grid, buffers.mask, bc_set, dt)
+    enforce_outflow_face_continuity!(buffers, grid, bc_set)
+    apply_velocity_cc_bcs!(
+        buffers.u, buffers.v, buffers.w,
+        grid, buffers.mask, bc_set, dt;
+        reverse_flow_stabilization=reverse_flow_stabilization
+    )
     
     return (iter, res)
 end
@@ -154,10 +159,11 @@ function euler_step!(
     poisson_config::PoissonConfig,
     Cs::Float64,
     nu::Float64,
+    reverse_flow_stabilization::Bool,
     par::String
 )
     # Reuse Full Fractional Step
-    return fractional_step!(buffers, grid, dt, bc_set, poisson_config, Cs, nu, par)
+    return fractional_step!(buffers, grid, dt, bc_set, poisson_config, Cs, nu, reverse_flow_stabilization, par)
 end
 
 function rk2_step!(
@@ -169,6 +175,7 @@ function rk2_step!(
     poisson_config::PoissonConfig,
     Cs::Float64,
     nu::Float64,
+    reverse_flow_stabilization::Bool,
     par::String
 )
     # Midpoint Method (Predictor-Corrector)
@@ -179,7 +186,7 @@ function rk2_step!(
     
     # 2. Stage 1: Predict u^{n+1/2} (Euler with dt/2)
     # We can use fractional_step!(dt/2) directly on buffers.u
-    fractional_step!(buffers, grid, dt * 0.5, bc_set, poisson_config, Cs, nu, par)
+    fractional_step!(buffers, grid, dt * 0.5, bc_set, poisson_config, Cs, nu, reverse_flow_stabilization, par)
     # buffers.u is now u^{n+1/2} (approx)
     
     # 3. Stage 2: H(u^{n+1/2})
@@ -196,7 +203,7 @@ function rk2_step!(
     
     # 5. Projection u* -> u^{n+1}
     iter, res = projection_step!(
-        buffers, grid, dt, bc_set, poisson_config, par;
+        buffers, grid, dt, bc_set, poisson_config, par, reverse_flow_stabilization;
         u_ref=rk_buffers.u_rk1, v_ref=rk_buffers.v_rk1, w_ref=rk_buffers.w_rk1
     )
     
@@ -212,6 +219,7 @@ function rk4_step!(
     poisson_config::PoissonConfig,
     Cs::Float64,
     nu::Float64,
+    reverse_flow_stabilization::Bool,
     par::String
 )
     # 4-Stage RK with Projection
@@ -261,7 +269,7 @@ function rk4_step!(
     
     # Project u1 (inplace to buffers.u)
     projection_step!(
-        buffers, grid, 0.5*dt, bc_set, poisson_config, par;
+        buffers, grid, 0.5*dt, bc_set, poisson_config, par, reverse_flow_stabilization;
         u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
     )
     
@@ -279,7 +287,7 @@ function rk4_step!(
     @inbounds @. buffers.w_star = u_n[3] + 0.5 * dt * k2[3]
     
     projection_step!(
-        buffers, grid, 0.5*dt, bc_set, poisson_config, par;
+        buffers, grid, 0.5*dt, bc_set, poisson_config, par, reverse_flow_stabilization;
         u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
     )
     
@@ -297,7 +305,7 @@ function rk4_step!(
     @inbounds @. buffers.w_star = u_n[3] + dt * k3[3]
     
     projection_step!(
-        buffers, grid, dt, bc_set, poisson_config, par;
+        buffers, grid, dt, bc_set, poisson_config, par, reverse_flow_stabilization;
         u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
     )
     
@@ -315,7 +323,7 @@ function rk4_step!(
     
     # Final Projection
     iter, res = projection_step!(
-        buffers, grid, dt, bc_set, poisson_config, par;
+        buffers, grid, dt, bc_set, poisson_config, par, reverse_flow_stabilization;
         u_ref=u_n[1], v_ref=u_n[2], w_ref=u_n[3]
     )
     
@@ -323,7 +331,7 @@ function rk4_step!(
 end
 
 """
-    advance!(buffers, grid, bc_set, time_config, poisson_config, Cs, par; rk_buffers=nothing)
+    advance!(buffers, grid, bc_set, time_config, poisson_config, Cs, nu, reverse_flow_stabilization, dt_fixed, par; rk_buffers=nothing)
 
 1タイムステップ進行。
 """
@@ -336,6 +344,7 @@ function advance!(
     poisson_config::PoissonConfig,
     Cs::Float64,
     nu::Float64,
+    reverse_flow_stabilization::Bool,
     dt_fixed::Float64,  # Fixed time step (calculated once at initialization)
     par::String;
     rk_buffers::Union{RKBuffers, Nothing} = nothing
@@ -343,17 +352,17 @@ function advance!(
     # Returns: (圧力反復回数, 圧力残差)
     
     if time_config.scheme == Euler
-        return euler_step!(buffers, grid, dt_fixed, bc_set, poisson_config, Cs, nu, par)
+        return euler_step!(buffers, grid, dt_fixed, bc_set, poisson_config, Cs, nu, reverse_flow_stabilization, par)
     elseif time_config.scheme == RK2
         if isnothing(rk_buffers)
             error("RK2 selected but rk_buffers not provided.")
         end
-        return rk2_step!(buffers, rk_buffers, grid, dt_fixed, bc_set, poisson_config, Cs, nu, par)
+        return rk2_step!(buffers, rk_buffers, grid, dt_fixed, bc_set, poisson_config, Cs, nu, reverse_flow_stabilization, par)
     elseif time_config.scheme == RK4
         if isnothing(rk_buffers)
             error("RK4 selected but rk_buffers not provided.")
         end
-        return rk4_step!(buffers, rk_buffers, grid, dt_fixed, bc_set, poisson_config, Cs, nu, par)
+        return rk4_step!(buffers, rk_buffers, grid, dt_fixed, bc_set, poisson_config, Cs, nu, reverse_flow_stabilization, par)
     else
         error("Unknown time integration scheme: $(time_config.scheme)")
     end

@@ -29,13 +29,13 @@
   "Intervals": {
     "display": 10,
     "history": 10,
-    "Instantaneous_file": 100,
+    "Instantaneous_file": 20,
     "averaged_file": 0,
     "checkpoint": 500
   },
   "Poisson_parameter": {
-    "solver": "cg",
-    "coef_acceleration": 1.0,
+    "solver": "RedBlackSOR",
+    "coef_acceleration": 1.2,
     "convergence_criteria": 0.001,
     "Iteration_max": 500,
     "on_divergence": "WarnContinue",

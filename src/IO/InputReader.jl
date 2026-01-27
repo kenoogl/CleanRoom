@@ -55,6 +55,7 @@ struct SimulationParams
     div_max_threshold::Float64
     initial_condition::InitialCondition
     restart_file::String
+    reverse_flow_stabilization::Bool
 end
 
 # --- Helper functions for JSON parsing ---
@@ -102,6 +103,10 @@ function load_parameters(filepath::String)::SimulationParams
     # --- Basic Params ---
     dry_run = parse_yesno(get(data, :dry_run, "no"), "dry_run")
     debug = parse_yesno(get(data, :debug, get(data, :Debug, "no")), "debug")
+    reverse_flow_stabilization = parse_yesno(
+        get(data, :reverse_flow_stabilization, get(data, :Reverse_flow_stabilization, "no")),
+        "reverse_flow_stabilization"
+    )
     start_str = lowercase(String(get(data, :start, "initial")))
     start_mode = if start_str == "initial"
         :initial
@@ -262,7 +267,7 @@ function load_parameters(filepath::String)::SimulationParams
         grid_config, courant_number, intervals,
         poisson_config, time_scheme,
         smagorinsky_constant, div_max_threshold,
-        initial_condition, restart_file
+        initial_condition, restart_file, reverse_flow_stabilization
     )
 end
 

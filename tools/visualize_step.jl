@@ -118,7 +118,7 @@ function plot_step_pressure(vd, pd; output_path=nothing)
               xautolimitmargin = (0.0, 0.0), yautolimitmargin = (0.0, 0.0))
     hm = heatmap!(ax, x, z, p, colormap = :plasma)
     contour!(ax, x, z, p, levels = levels, color = :black, linewidth = 0.8)
-    Colorbar(fig[2, 2], hm, label = "P")
+    Colorbar(fig[2, 2], hm, label = "Pressure [Pa]")
 
     colsize!(fig.layout, 1, Relative(0.92))
     colsize!(fig.layout, 2, Relative(0.08))
