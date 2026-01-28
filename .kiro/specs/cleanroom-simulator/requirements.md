@@ -319,6 +319,7 @@ $$
 11. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
 12. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor, rbsor, ssor, rbssor）を選択できる（noneは前処理なし）
 13. When solver=MG-SOR の場合, the Solver shall cycle オプション（V/W/FM G）と smoother オプション（sor/rbsor/ssor/rbssor）を選択できる
+14. The Solver shall 前処理スイープで `negate_rhs=true` を使用し、CG/BiCGSTAB の SPD 形式（b' = -rhs * vol）と符号を整合させる。SOR 単体ソルバーは元の方程式形式（b = rhs * vol）を使用する
 
 #### 圧力平均値の引き戻し
 

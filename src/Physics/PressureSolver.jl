@@ -182,7 +182,8 @@ end
     mask::Array{Float64, 3},
     grid::GridData,
     alpha::Float64,
-    omega::Float64
+    omega::Float64;
+    negate_rhs::Bool=false
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
@@ -211,7 +212,8 @@ end
                 cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
                 dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-                b_val = rhs[i, j, k] * vol
+                rhs_sign = negate_rhs ? -1.0 : 1.0
+                b_val = rhs_sign * rhs[i, j, k] * vol
                 ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                      cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                      cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
@@ -225,7 +227,7 @@ end
 end
 
 """
-    sor_sweep_rbssor!(p, rhs, mask, grid, alpha, omega, color1, color2, forward)
+    sor_sweep_rbssor!(p, rhs, mask, grid, alpha, omega, color1, color2, forward; negate_rhs=false)
 
 RBSSORスイープ: color1→color2の順で処理
 forward=true: インデックス昇順、forward=false: インデックス降順
@@ -239,10 +241,12 @@ forward=true: インデックス昇順、forward=false: インデックス降順
     omega::Float64,
     color1::Int,
     color2::Int,
-    forward::Bool
+    forward::Bool;
+    negate_rhs::Bool=false
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
+    rhs_sign = negate_rhs ? -1.0 : 1.0
 
     for color in (color1, color2)
         if forward
@@ -269,7 +273,7 @@ forward=true: インデックス昇順、forward=false: インデックス降順
                     cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
                     dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-                    b_val = rhs[i, j, k] * vol
+                    b_val = rhs_sign * rhs[i, j, k] * vol
                     ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                          cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                          cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
@@ -304,7 +308,7 @@ forward=true: インデックス昇順、forward=false: インデックス降順
                     cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
                     dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-                    b_val = rhs[i, j, k] * vol
+                    b_val = rhs_sign * rhs[i, j, k] * vol
                     ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                          cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                          cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
@@ -325,10 +329,13 @@ end
     grid::GridData,
     alpha::Float64,
     omega::Float64;
-    backward::Bool=false
+    backward::Bool=false,
+    negate_rhs::Bool=false
 )
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
+
+    rhs_sign = negate_rhs ? -1.0 : 1.0
 
     if !backward
         @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
@@ -352,7 +359,7 @@ end
             cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
             dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-            b_val = rhs[i, j, k] * vol
+            b_val = rhs_sign * rhs[i, j, k] * vol
             ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                  cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
@@ -383,7 +390,7 @@ end
             cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
 
             dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-            b_val = rhs[i, j, k] * vol
+            b_val = rhs_sign * rhs[i, j, k] * vol
             ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
                  cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
                  cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
@@ -708,17 +715,17 @@ function apply_preconditioner!(
 
     for _ in 1:PRECONDITIONER_SWEEPS
         if precond == PrecondRBSOR
-            sor_sweep_rbsor!(z, r, mask, grid, alpha, omega)
+            sor_sweep_rbsor!(z, r, mask, grid, alpha, omega; negate_rhs=true)
         elseif precond == PrecondSOR
-            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=false)
+            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=false, negate_rhs=true)
         elseif precond == PrecondSSOR
-            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=false)
-            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=true)
+            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=false, negate_rhs=true)
+            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=true, negate_rhs=true)
         else # PrecondRBSSOR
-            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 0, 1, true)   # 前進 R→B
-            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 1, 0, false)  # 後退 B→R
-            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 1, 0, true)   # 前進 B→R
-            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 0, 1, false)  # 後退 R→B
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 0, 1, true; negate_rhs=true)   # 前進 R→B
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 1, 0, false; negate_rhs=true)  # 後退 B→R
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 1, 0, true; negate_rhs=true)   # 前進 B→R
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 0, 1, false; negate_rhs=true)  # 後退 R→B
         end
 
         apply_periodic_pressure_if_needed!(z, grid, bc_set)

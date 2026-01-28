@@ -290,6 +290,24 @@ RBSSORソルバーとPrecondRBSSOR前処理の実装（4スイープ対称構造
 
 ---
 
+## Task 23: 前処理の符号整合性（negate_rhsフラグ）
+
+**Status**: COMPLETED
+
+**Requirements**: 7.5
+
+CG/BiCGSTAB の SPD 形式と SOR 前処理の符号整合性を確保する
+
+- [x] 23.1: sor_sweep_rbsor! に negate_rhs パラメータを追加し、b_val = rhs_sign * rhs * vol で計算
+- [x] 23.2: sor_sweep_lex! に negate_rhs パラメータを追加
+- [x] 23.3: sor_sweep_rbssor! に negate_rhs パラメータを追加
+- [x] 23.4: apply_preconditioner! で negate_rhs=true を指定して呼び出す
+- [x] 23.5: CG + SSOR 収束検証（以前発散→27反復で収束）
+- [x] 23.6: BiCGSTAB + SSOR 収束検証（17反復で収束、継続動作確認）
+- [x] 23.7: 設計書に符号整合性の説明を追加
+
+---
+
 ## 優先順位（推奨実行順序）
 1. Task 1: 境界条件JSONスキーマ（最重要、他タスクの基盤）
 2. Task 2: internal_boundariesの物体化
@@ -313,3 +331,4 @@ RBSSORソルバーとPrecondRBSSOR前処理の実装（4スイープ対称構造
 20. Task 19: history.txt出力拡張
 21. Task 20: 逆流安定化オプション
 22. Task 22: ssor前処理のrbsor実装
+23. Task 23: 前処理の符号整合性
