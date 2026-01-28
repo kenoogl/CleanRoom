@@ -211,20 +211,41 @@ function load_parameters(filepath::String)::SimulationParams
 
     # --- Poisson ---
     p = data.Poisson_parameter
-    p_solver_str = lowercase(String(get(p, :solver, "redbacksor")))
-    solver_type = if p_solver_str == "cg"; CG
-                  elseif p_solver_str == "bicgstab"; BiCGSTAB
-                  else; RedBlackSOR
-                  end
+    p_solver_str = lowercase(String(get(p, :solver, "rbsor")))
+    solver_type = if p_solver_str == "cg"
+        CG
+    elseif p_solver_str == "bicgstab"
+        BiCGSTAB
+    elseif p_solver_str == "sor"
+        SOR
+    elseif p_solver_str == "ssor"
+        SSOR
+    elseif p_solver_str == "rbsor"
+        RBSOR
+    elseif p_solver_str == "rbssor"
+        RBSSOR
+    else
+        error("Unknown solver: $(p_solver_str)")
+    end
     
     div_action_str = lowercase(String(get(p, :on_divergence, "warncontinue")))
     action_type = (div_action_str == "abort") ? Abort : WarnContinue
 
     precond_str = lowercase(String(get(p, :preconditioner, "sor")))
-    precond_type = if precond_str == "none"; PrecondNone
-                   elseif precond_str == "sor"; PrecondSOR
-                   else; error("Unknown preconditioner: $(precond_str)")
-                   end
+    precond_type = if precond_str == "none"
+        PrecondNone
+    elseif precond_str == "sor"
+        PrecondSOR
+    elseif precond_str == "rbsor"
+        PrecondRBSOR
+    elseif precond_str == "ssor"
+        PrecondSSOR
+    elseif precond_str == "rbssor"
+        PrecondRBSSOR
+    else
+        error("Unknown preconditioner: $(precond_str)")
+    end
+
 
     poisson_config = PoissonConfig(
         solver_type,

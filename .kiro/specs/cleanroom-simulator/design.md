@@ -456,7 +456,7 @@ end
 function estimate_memory_size(
     Nx::Int, Ny::Int, Nz::Int;
     time_scheme::Symbol = :Euler,
-    solver::SolverType = RedBlackSOR
+    solver::SolverType = RBSOR
 )::NamedTuple{(:bytes, :gb, :arrays, :breakdown), Tuple{Int, Float64, Int, String}}
     mx, my, mz = Nx + 4, Ny + 4, Nz + 4
     cell_count = mx * my * mz
@@ -469,8 +469,8 @@ function estimate_memory_size(
     base_arrays = 20
 
     # KrylovBuffers（反復法依存）
-    krylov_arrays = if solver == RedBlackSOR
-        0       # SORは追加配列不要
+    krylov_arrays = if solver == SOR || solver == RBSOR || solver == SSOR || solver == RBSSOR
+        0       # SOR系は追加配列不要
     elseif solver == CG
         3       # r, p, q
     else  # BiCGSTAB
@@ -671,17 +671,21 @@ end
 | Requirements | 7.1-7.12 |
 
 **Responsibilities & Constraints**
-- Red-Black SOR法（必須）
+- SOR / RBSOR / SSOR / RBSSOR 法（必須）
 - CG/BiCGSTAB（オプション）
+- MultiGrid-SOR（MG-SOR）: V/W/FM G サイクルを選択可能（オプション）
 - 反復ループ内での `apply_pressure_bcs!` 呼び出しによる境界条件（Neumann/Periodic等）のリアルタイム更新
 - 真の残差 $|b - Ax|$ に基づく収束判定
-- CG/BiCGSTABは前処理オプション（none / sor）をサポート
+- CG/BiCGSTABは前処理オプション（none / sor / rbsor / ssor / rbssor）をサポート
+- MG-SORは cycle（V/W/FM G）と smoother（sor/rbsor/ssor/rbssor）をサポート
 - CG/BiCGSTABはSPD形（A'=-A, b'=-b）で解く
 - α=0（特異系）の場合はrhs平均値を除去してから解き、解法後に復元する
-- **前処理（sor: 対称Gauss-Seidel）**:
-  - 対称Gauss-Seidel前処理: 前進スイープ → 後退スイープを交互に実行
-  - `PRECONDITIONER_ITERATION = 4`（ハードコード）: 前進2回 + 後退2回（対称性を保持、Gauss-Seidel 4 sweep）
-  - 各スイープでRed-Black順序を使用し並列化可能
+- **前処理（sor / rbsor / ssor / rbssor）**:
+  - sor: Gauss-Seidel 前進スイープ
+  - rbsor: Red-Black SOR スイープ（並列化容易）
+  - ssor: Lexicographical順序による対称スイープ（前進→後退）
+  - rbssor: Red-Black SORによる4スイープ対称構造（前進R→B + 後退B→R + 前進B→R + 後退R→B）
+  - `PRECONDITIONER_SWEEPS = 4`（ハードコード）: 前処理適用回数
   - 前処理行列 M ≈ (D + L) D⁻¹ (D + U) の近似逆行列として作用
   - none指定時は前処理を行わない
   - 前処理後に周期境界を明示適用する
@@ -704,9 +708,13 @@ end
 const PRECONDITIONER_ITERATION = 4  # 対称Gauss-Seidel反復回数（偶数で対称性保持）
 
 @enum SolverType begin
-    RedBlackSOR
+    SOR
+    RBSOR
+    SSOR
+    RBSSOR    # rbsor 4スイープ対称構造（前進R→B, 後退B→R, 前進B→R, 後退R→B）
     CG
     BiCGSTAB
+    MGSOR
 end
 
 @enum DivergenceAction begin
@@ -717,15 +725,30 @@ end
 @enum PreconditionerType begin
     PrecondNone
     PrecondSOR
+    PrecondRBSOR
+    PrecondSSOR
+    PrecondRBSSOR  # rbsor 4スイープ対称構造
 end
 
 struct PoissonConfig
     solver::SolverType
-    omega::Float64             # SOR加速係数
+    omega::Float64             # SOR加速係数（SOR/RBSOR/SSOR/RBSSOR）
     tol::Float64               # 収束判定値
     max_iter::Int              # 最大反復回数
     on_divergence::DivergenceAction  # 収束失敗時の動作（デフォルト: WarnContinue）
     preconditioner::PreconditionerType  # 前処理（CG/BiCGSTABのみ）
+end
+
+# MG-SOR 設定
+struct MGSORConfig
+    cycle::Symbol              # :V | :W | :FMG
+    smoother::Symbol           # :sor | :rbsor | :ssor | :rbssor
+    pre_sweeps::Int
+    post_sweeps::Int
+    coarse_solver::Symbol      # :sor | :rbsor | :ssor | :rbssor
+    coarse_max_iter::Int
+    max_levels::Int
+    restriction::Symbol        # :max | :avg
 end
 
 function solve_poisson!(

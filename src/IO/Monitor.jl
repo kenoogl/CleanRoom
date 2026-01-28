@@ -137,7 +137,7 @@ function write_condition_file(
         else
             @printf(io, "  %-22s %s\n", "Preconditioner:", "N/A")
         end
-        if sim_params.poisson.solver == RedBlackSOR
+        if sim_params.poisson.solver == SOR || sim_params.poisson.solver == RBSOR || sim_params.poisson.solver == SSOR || sim_params.poisson.solver == RBSSOR
             @printf(io, "  %-22s %12.4g\n", "SOR Omega:", sim_params.poisson.omega)
         end
         @printf(io, "  %-22s %12.1e\n", "Convergence Criteria:", sim_params.poisson.tol)
@@ -543,8 +543,8 @@ function log_stability_violation(
         # Poisson residuals
         update_boundary_mask!(buffers.mask, grid, bc_set, 0.0) # inflow/outflow/opening set to 0
         alpha = poisson_params.mach2 / (dt_fixed * dt_fixed)
-        res0 = PressureSolver.compute_residual_sor(buffers.p_prev, buffers.rhs, buffers.mask, grid, poisson_params.omega, alpha)
-        res1 = PressureSolver.compute_residual_sor(buffers.p, buffers.rhs, buffers.mask, grid, poisson_params.omega, alpha)
+        res0 = PressureSolver.calc_residual!(nothing, buffers.p_prev, buffers.rhs, buffers.mask, grid, alpha)
+        res1 = PressureSolver.calc_residual!(nothing, buffers.p, buffers.rhs, buffers.mask, grid, alpha)
         update_boundary_mask!(buffers.mask, grid, bc_set, 1.0)
         
         println("Stability violation: CFL=$(metrics.cfl), D=$(metrics.diff_num)")

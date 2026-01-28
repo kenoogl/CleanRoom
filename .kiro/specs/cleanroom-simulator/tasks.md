@@ -97,7 +97,7 @@ Outflow境界の粘性項は特別扱いせず、ゴーストセル値とマス�
 - [x] 7.1: PRECONDITIONER_SWEEPSを4に変更
 - [x] 7.2: BiCGSTAB法を実装（前処理付き）
 - [x] 7.3: on_divergence設定（WarnContinue/Abort）の動作を実装
-- [x] 7.4: CG/BiCGSTABの前処理オプション（none/sor）を追加し、noneは前処理なしとする
+- [x] 7.4: CG/BiCGSTABの前処理オプション（none/sor/rbsor/ssor）を追加し、noneは前処理なしとする
 - [x] 7.5: CG/BiCGSTABをSPD形（A'=-A, b'=-b）で解く
 - [x] 7.6: α=0の特異系でrhs平均値を除去・復元する
 - [x] 7.7: 前処理後に周期境界を明示適用する
@@ -179,7 +179,7 @@ f⁻用の右側再構成関数を追加
 - [x] 13.1: condition.txt出力関数を実装
 - [x] 13.2: 物理パラメータ、格子、時間積分、境界条件、出力間隔を記録
 - [x] 13.3: condition.txtにOpening/内部境界/境界優先順位/動的マスク設定を含める
-- [x] 13.4: condition.txtに前処理オプション（none/sor）を出力する
+- [x] 13.4: condition.txtに前処理オプション（none/sor/rbsor/ssor）を出力する
 
 ---
 
@@ -276,6 +276,20 @@ Outflow境界での逆流時にフラックスをゼロクリップ
 
 ---
 
+## Task 22: RBSSOR（rbsorによる4スイープ対称構造）の実装
+**Requirements**: 7.1
+
+RBSSORソルバーとPrecondRBSSOR前処理の実装（4スイープ対称構造）
+
+- [x] 22.1: SolverType/PreconditionerTypeにRBSSOR/PrecondRBSSORを追加
+- [x] 22.2: sor_sweep_rbssor!関数を実装（前進R→B, 後退B→R, 前進B→R, 後退R→B）
+- [x] 22.3: solve_poisson!/apply_preconditioner!でRBSSORをディスパッチ
+- [x] 22.4: InputReader/MonitorにRBSSOR対応を追加
+- [x] 22.5: 設計書・要件書にRBSSORを追加
+- [x] 22.6: RBSSOR収束性検証（RBSOR: 40反復, SSOR: 35反復, RBSSOR: 53反復で収束確認）
+
+---
+
 ## 優先順位（推奨実行順序）
 1. Task 1: 境界条件JSONスキーマ（最重要、他タスクの基盤）
 2. Task 2: internal_boundariesの物体化
@@ -298,3 +312,4 @@ Outflow境界での逆流時にフラックスをゼロクリップ
 19. Task 18: dry_runモード
 20. Task 19: history.txt出力拡張
 21. Task 20: 逆流安定化オプション
+22. Task 22: ssor前処理のrbsor実装

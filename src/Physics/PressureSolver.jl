@@ -8,8 +8,8 @@ using LinearAlgebra # for norm
 using FLoops
 
 export SolverType, DivergenceAction, PreconditionerType, PoissonConfig
-export RedBlackSOR, CG, BiCGSTAB, WarnContinue, Abort
-export PrecondNone, PrecondSOR
+export SOR, RBSOR, SSOR, RBSSOR, CG, BiCGSTAB, WarnContinue, Abort
+export PrecondNone, PrecondSOR, PrecondRBSOR, PrecondSSOR, PrecondRBSSOR
 export solve_poisson!
 
 const PRECONDITIONER_SWEEPS = 4
@@ -74,7 +74,10 @@ end
 end
 
 @enum SolverType begin
-    RedBlackSOR
+    SOR
+    RBSOR
+    SSOR
+    RBSSOR    # rbsor 4スイープ対称構造（前進R→B, 後退B→R, 前進B→R, 後退R→B）
     CG
     BiCGSTAB
 end
@@ -87,6 +90,16 @@ end
 @enum PreconditionerType begin
     PrecondNone
     PrecondSOR
+    PrecondRBSOR
+    PrecondSSOR
+    PrecondRBSSOR  # rbsor 4スイープ対称構造
+end
+
+@enum SORSweepMode begin
+    Sweep_LEX
+    Sweep_RBSOR
+    Sweep_SSOR
+    Sweep_RBSSOR  # rbsorによる対称スイープ
 end
 
 struct PoissonConfig
@@ -115,8 +128,14 @@ function solve_poisson!(
     alpha::Float64 = 0.0
 )::Tuple{Bool, Int, Float64}
     # Solver dispatch
-    result = if config.solver == RedBlackSOR
-        solve_poisson_sor!(buffers, grid, config, bc_set, par, alpha)
+    result = if config.solver == RBSOR
+        solve_poisson_sor_core!(buffers, grid, config, bc_set, par, alpha, Sweep_RBSOR)
+    elseif config.solver == SOR
+        solve_poisson_sor_core!(buffers, grid, config, bc_set, par, alpha, Sweep_LEX)
+    elseif config.solver == SSOR
+        solve_poisson_sor_core!(buffers, grid, config, bc_set, par, alpha, Sweep_SSOR)
+    elseif config.solver == RBSSOR
+        solve_poisson_sor_core!(buffers, grid, config, bc_set, par, alpha, Sweep_RBSSOR)
     elseif config.solver == CG
         solve_poisson_cg!(buffers, grid, config, bc_set, par, alpha)
     elseif config.solver == BiCGSTAB
@@ -157,23 +176,234 @@ function solve_poisson!(
     return result
 end
 
+@inline function sor_sweep_rbsor!(
+    p::Array{Float64, 3},
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    alpha::Float64,
+    omega::Float64
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+
+    # Red(0) → Black(1) の順でスイープ（並列化可能）
+    for color in 0:1
+        @floop for k in 3:mz-2, j in 3:my-2, i in (3 + (j + k + color + 1) % 2):2:mx-2
+            @inbounds begin
+                dz_k_val = grid.dz[k]
+                dZ_p = grid.z_center[k+1] - grid.z_center[k]
+                dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+                base_cz_p = (dx * dy) / dZ_p
+                base_cz_m = (dx * dy) / dZ_m
+                base_cy = (dx * dz_k_val) / dy
+                base_cx = (dy * dz_k_val) / dx
+                vol = dx * dy * dz_k_val
+
+                m0 = mask[i, j, k]
+
+                cond_xm = base_cx * (mask[i-1, j, k] * m0)
+                cond_xp = base_cx * (mask[i+1, j, k] * m0)
+                cond_ym = base_cy * (mask[i, j-1, k] * m0)
+                cond_yp = base_cy * (mask[i, j+1, k] * m0)
+                cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+                cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+                dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+                b_val = rhs[i, j, k] * vol
+                ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+                     cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+                     cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+
+                pp = p[i, j, k]
+                dp = ((ss - b_val) / dd - pp) * m0
+                p[i, j, k] = pp + omega * dp
+            end
+        end
+    end
+end
+
 """
-    solve_poisson_sor!(buffers, grid, config, bc_set, par, alpha)
-    
-Red-Black SOR法による実装
-参考: /Users/Daily/Development/H2/src/NonUniform.jl (rbsor_core!, rbsor!, solveSOR!)
+    sor_sweep_rbssor!(p, rhs, mask, grid, alpha, omega, color1, color2, forward)
+
+RBSSORスイープ: color1→color2の順で処理
+forward=true: インデックス昇順、forward=false: インデックス降順
 """
-function solve_poisson_sor!(
+@inline function sor_sweep_rbssor!(
+    p::Array{Float64, 3},
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    alpha::Float64,
+    omega::Float64,
+    color1::Int,
+    color2::Int,
+    forward::Bool
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+
+    for color in (color1, color2)
+        if forward
+            @inbounds for k in 3:mz-2, j in 3:my-2
+                i_start = 3 + (j + k + color + 1) % 2
+                for i in i_start:2:mx-2
+                    dz_k_val = grid.dz[k]
+                    dZ_p = grid.z_center[k+1] - grid.z_center[k]
+                    dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+                    base_cz_p = (dx * dy) / dZ_p
+                    base_cz_m = (dx * dy) / dZ_m
+                    base_cy = (dx * dz_k_val) / dy
+                    base_cx = (dy * dz_k_val) / dx
+                    vol = dx * dy * dz_k_val
+
+                    m0 = mask[i, j, k]
+
+                    cond_xm = base_cx * (mask[i-1, j, k] * m0)
+                    cond_xp = base_cx * (mask[i+1, j, k] * m0)
+                    cond_ym = base_cy * (mask[i, j-1, k] * m0)
+                    cond_yp = base_cy * (mask[i, j+1, k] * m0)
+                    cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+                    cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+                    b_val = rhs[i, j, k] * vol
+                    ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+                         cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+                         cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+
+                    pp = p[i, j, k]
+                    dp = ((ss - b_val) / dd - pp) * m0
+                    p[i, j, k] = pp + omega * dp
+                end
+            end
+        else
+            @inbounds for k in (mz-2):-1:3, j in (my-2):-1:3
+                i_base = 3 + (j + k + color + 1) % 2
+                i_start = i_base + 2 * ((mx - 2 - i_base) ÷ 2)
+                for i in i_start:-2:3
+                    dz_k_val = grid.dz[k]
+                    dZ_p = grid.z_center[k+1] - grid.z_center[k]
+                    dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+                    base_cz_p = (dx * dy) / dZ_p
+                    base_cz_m = (dx * dy) / dZ_m
+                    base_cy = (dx * dz_k_val) / dy
+                    base_cx = (dy * dz_k_val) / dx
+                    vol = dx * dy * dz_k_val
+
+                    m0 = mask[i, j, k]
+
+                    cond_xm = base_cx * (mask[i-1, j, k] * m0)
+                    cond_xp = base_cx * (mask[i+1, j, k] * m0)
+                    cond_ym = base_cy * (mask[i, j-1, k] * m0)
+                    cond_yp = base_cy * (mask[i, j+1, k] * m0)
+                    cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+                    cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+                    b_val = rhs[i, j, k] * vol
+                    ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+                         cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+                         cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+
+                    pp = p[i, j, k]
+                    dp = ((ss - b_val) / dd - pp) * m0
+                    p[i, j, k] = pp + omega * dp
+                end
+            end
+        end
+    end
+end
+
+@inline function sor_sweep_lex!(
+    p::Array{Float64, 3},
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    alpha::Float64,
+    omega::Float64;
+    backward::Bool=false
+)
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+
+    if !backward
+        @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+            dz_k_val = grid.dz[k]
+            dZ_p = grid.z_center[k+1] - grid.z_center[k]
+            dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+            base_cz_p = (dx * dy) / dZ_p
+            base_cz_m = (dx * dy) / dZ_m
+            base_cy = (dx * dz_k_val) / dy
+            base_cx = (dy * dz_k_val) / dx
+            vol = dx * dy * dz_k_val
+
+            m0 = mask[i, j, k]
+
+            cond_xm = base_cx * (mask[i-1, j, k] * m0)
+            cond_xp = base_cx * (mask[i+1, j, k] * m0)
+            cond_ym = base_cy * (mask[i, j-1, k] * m0)
+            cond_yp = base_cy * (mask[i, j+1, k] * m0)
+            cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+            cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+            b_val = rhs[i, j, k] * vol
+            ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+                 cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+                 cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+
+            pp = p[i, j, k]
+            dp = ((ss - b_val) / dd - pp) * m0
+            p[i, j, k] = pp + omega * dp
+        end
+    else
+        @inbounds for k in (mz-2):-1:3, j in (my-2):-1:3, i in (mx-2):-1:3
+            dz_k_val = grid.dz[k]
+            dZ_p = grid.z_center[k+1] - grid.z_center[k]
+            dZ_m = grid.z_center[k] - grid.z_center[k-1]
+
+            base_cz_p = (dx * dy) / dZ_p
+            base_cz_m = (dx * dy) / dZ_m
+            base_cy = (dx * dz_k_val) / dy
+            base_cx = (dy * dz_k_val) / dx
+            vol = dx * dy * dz_k_val
+
+            m0 = mask[i, j, k]
+
+            cond_xm = base_cx * (mask[i-1, j, k] * m0)
+            cond_xp = base_cx * (mask[i+1, j, k] * m0)
+            cond_ym = base_cy * (mask[i, j-1, k] * m0)
+            cond_yp = base_cy * (mask[i, j+1, k] * m0)
+            cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+            cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+
+            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+            b_val = rhs[i, j, k] * vol
+            ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+                 cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+                 cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+
+            pp = p[i, j, k]
+            dp = ((ss - b_val) / dd - pp) * m0
+            p[i, j, k] = pp + omega * dp
+        end
+    end
+end
+
+function solve_poisson_sor_core!(
     buffers::CFDBuffers,
     grid::GridData,
     config::PoissonConfig,
     bc_set,
     par::String,
-    alpha::Float64
+    alpha::Float64,
+    sweep_mode::SORSweepMode
 )::Tuple{Bool, Int, Float64}
-    
-    mx, my, mz = grid.mx, grid.my, grid.mz
-    
     p = buffers.p
     rhs = buffers.rhs
     mask = buffers.mask
@@ -182,96 +412,46 @@ function solve_poisson_sor!(
     residual = 0.0
     converged = false
 
-    # Ensure BCs are consistent before computing initial residual
     if !isnothing(bc_set)
         apply_pressure_bcs!(p, grid, mask, bc_set)
     end
 
-    res0 = compute_residual_sor(p, rhs, mask, grid, config.omega, alpha)
+    res0 = calc_residual!(nothing, p, rhs, mask, grid, alpha)
     if res0 == 0.0
         res0 = 1.0
     end
-    
-    dx = grid.dx
-    dy = grid.dy
-    # 非等方係数のため、それぞれの面積・距離成分を計算
-    
-    # ワーク配列なしで、ループ内で係数を計算する方式（NonUniform.jlのrbsor_core!と同様）
-    # これによりメモリ使用量を抑えつつ、キャッシュ効率を上げる
-    
+
     while iter < config.max_iter
         iter += 1
-        
-        # SOR Update Loop (Red/Black)
-        for color in 0:1
-            @floop for k in 3:mz-2, j in 3:my-2
-                # k-dependent geometry properties
-                dz_k_val = grid.dz[k]
-                dZ_p = grid.z_center[k+1] - grid.z_center[k]
-                dZ_m = grid.z_center[k] - grid.z_center[k-1]
-                
-                # Z coefficients
-                base_cz_p = (dx * dy) / dZ_p
-                base_cz_m = (dx * dy) / dZ_m
-                base_cy = (dx * dz_k_val) / dy
-                base_cx = (dy * dz_k_val) / dx
-                vol = dx * dy * dz_k_val
 
-                @simd for i in (3 + (j + k + color + 1) % 2):2:mx-2
-                    m0 = mask[i, j, k]
-                    
-                    # Neighbor masks
-                    m_xm = mask[i-1, j, k]
-                    m_xp = mask[i+1, j, k]
-                    m_ym = mask[i, j-1, k]
-                    m_yp = mask[i, j+1, k]
-                    m_zm = mask[i, j, k-1]
-                    m_zp = mask[i, j, k+1]
-                    
-                    # Coefficients
-                    cond_xm = base_cx * (m_xm * m0)
-                    cond_xp = base_cx * (m_xp * m0)
-                    cond_ym = base_cy * (m_ym * m0)
-                    cond_yp = base_cy * (m_yp * m0)
-                    cond_zm = base_cz_m * (m_zm * m0)
-                    cond_zp = base_cz_p * (m_zp * m0)
-                    
-                    # Diagonal term
-                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-                    
-                    # RHS term
-                    b_val = rhs[i, j, k] * vol
-                    
-                    # Neighbor sum
-                    ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
-                         cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
-                         cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
-                    
-                    # Update
-                    pp = p[i, j, k]
-                    dp = ((ss - b_val) / dd - pp) * m0
-                    p[i, j, k] = pp + config.omega * dp
-                end
-            end
+        if sweep_mode == Sweep_RBSOR
+            sor_sweep_rbsor!(p, rhs, mask, grid, alpha, config.omega)
+        elseif sweep_mode == Sweep_LEX
+            sor_sweep_lex!(p, rhs, mask, grid, alpha, config.omega; backward=false)
+        elseif sweep_mode == Sweep_SSOR
+            sor_sweep_lex!(p, rhs, mask, grid, alpha, config.omega; backward=false)
+            sor_sweep_lex!(p, rhs, mask, grid, alpha, config.omega; backward=true)
+        else # Sweep_RBSSOR
+            # 前進R→B + 後退B→R + 前進B→R + 後退R→B
+            sor_sweep_rbssor!(p, rhs, mask, grid, alpha, config.omega, 0, 1, true)   # 前進 R→B
+            sor_sweep_rbssor!(p, rhs, mask, grid, alpha, config.omega, 1, 0, false)  # 後退 B→R
+            sor_sweep_rbssor!(p, rhs, mask, grid, alpha, config.omega, 1, 0, true)   # 前進 B→R
+            sor_sweep_rbssor!(p, rhs, mask, grid, alpha, config.omega, 0, 1, false)  # 後退 R→B
         end
-        
-        # Apply BCs immediately after update to ensure ghost cells are consistent
+
         if !isnothing(bc_set)
             apply_pressure_bcs!(p, grid, mask, bc_set)
         end
-        
-        # Compute residual with consistent ghost cells
-        # Note: omega is not used in residual calculation (just normalization scale if needed, but we use true residual)
-        # We reuse compute_residual_sor which calculates true residual norm
-        current_res_norm = compute_residual_sor(p, rhs, mask, grid, config.omega, alpha)
+
+        current_res_norm = calc_residual!(nothing, p, rhs, mask, grid, alpha)
         residual = current_res_norm / res0
-        
+
         if residual < config.tol
             converged = true
             break
         end
     end
-    
+
     return (converged, iter, residual)
 end
 
@@ -307,7 +487,7 @@ function solve_poisson_cg!(
     
     # 1. Compute initial residual: r = b - Ap
     apply_periodic_pressure_if_needed!(p, grid, bc_set)
-    res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, helm_alpha)
+    res0 = calc_residual!(r, p, rhs, mask, grid, helm_alpha)
     if res0 == 0.0
         restore_rhs_mean!(rhs, mask, grid, rhs_avg)
         return (true, 0, 0.0)
@@ -408,7 +588,7 @@ function calc_laplacian_cg!(
     mx, my, mz = grid.mx, grid.my, grid.mz
     dx, dy = grid.dx, grid.dy
     
-    @inbounds for k in 3:mz-2
+    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
         dz_k = grid.dz[k]
         dZ_p = grid.z_center[k+1] - grid.z_center[k]
         dZ_m = grid.z_center[k] - grid.z_center[k-1]
@@ -419,150 +599,87 @@ function calc_laplacian_cg!(
         base_cx = (dy * dz_k) / dx
         
         vol = dx * dy * dz_k
-        for j in 3:my-2, i in 3:mx-2
-            m0 = mask[i, j, k]
-            
-            m_xm = mask[i-1, j, k]
-            m_xp = mask[i+1, j, k]
-            m_ym = mask[i, j-1, k]
-            m_yp = mask[i, j+1, k]
-            m_zm = mask[i, j, k-1]
-            m_zp = mask[i, j, k+1]
-            
-            cond_xm = base_cx * (m_xm * m0)
-            cond_xp = base_cx * (m_xp * m0)
-            cond_ym = base_cy * (m_ym * m0)
-            cond_yp = base_cy * (m_yp * m0)
-            cond_zm = base_cz_m * (m_zm * m0)
-            cond_zp = base_cz_p * (m_zp * m0)
-            
-            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-            
-            ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
-                 cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
-                 cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
-            
-            # Ap = (-A) * p = (dd * p - ss)  (SPD form)
-            Ap[i, j, k] = (dd * p[i, j, k] - ss) * m0
-        end
-    end
-end
-
-
-"""
-    calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
-    
-Compute residual r = b - Ap and return ||r|| (b is negated for SPD form)
-"""
-function calc_residual_cg!(
-    r::Array{Float64, 3},
-    p::Array{Float64, 3},
-    rhs::Array{Float64, 3},
-    mask::Array{Float64, 3},
-    grid::GridData,
-    par::String,
-    alpha::Float64
-)::Float64
-    mx, my, mz = grid.mx, grid.my, grid.mz
-    dx, dy = grid.dx, grid.dy
-    
-    res_sq = 0.0
-    
-    @inbounds for k in 3:mz-2
-        dz_k = grid.dz[k]
-        dZ_p = grid.z_center[k+1] - grid.z_center[k]
-        dZ_m = grid.z_center[k] - grid.z_center[k-1]
         
-        base_cz_p = (dx * dy) / dZ_p
-        base_cz_m = (dx * dy) / dZ_m
-        base_cy = (dx * dz_k) / dy
-        base_cx = (dy * dz_k) / dx
-        vol = dx * dy * dz_k
-        
-        for j in 3:my-2, i in 3:mx-2
-            m0 = mask[i, j, k]
-            
-            m_xm = mask[i-1, j, k]
-            m_xp = mask[i+1, j, k]
-            m_ym = mask[i, j-1, k]
-            m_yp = mask[i, j+1, k]
-            m_zm = mask[i, j, k-1]
-            m_zp = mask[i, j, k+1]
-            
-            cond_xm = base_cx * (m_xm * m0)
-            cond_xp = base_cx * (m_xp * m0)
-            cond_ym = base_cy * (m_ym * m0)
-            cond_yp = base_cy * (m_yp * m0)
-            cond_zm = base_cz_m * (m_zm * m0)
-            cond_zp = base_cz_p * (m_zp * m0)
-            
-            dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-            
-            ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
-                 cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
-                 cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
-            
-            b_val = -rhs[i, j, k] * vol
-            
-            # Use SPD form: A' = -A, b' = -b
-            # A' * p = dd * p - ss, r = b' - A' * p
-            r_val = (b_val - (dd * p[i, j, k] - ss)) * m0
-            r[i, j, k] = r_val
-            res_sq += r_val * r_val
-        end
-    end
-    
-    return sqrt(res_sq)
-end
-
-"""
-    compute_residual_sor(p, rhs, mask, grid, omega, alpha)
-
-Compute SOR residual norm (H2-style) for normalization (Helmholtz対応).
-"""
-function compute_residual_sor(
-    p::Array{Float64, 3},
-    rhs::Array{Float64, 3},
-    mask::Array{Float64, 3},
-    grid::GridData,
-    omega::Float64,
-    alpha::Float64
-)::Float64
-    mx, my, mz = grid.mx, grid.my, grid.mz
-    dx, dy = grid.dx, grid.dy
-    res_sq = 0.0
-
-    @floop for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
-        dz_k_val = grid.dz[k]
-        dZ_p = grid.z_center[k+1] - grid.z_center[k]
-        dZ_m = grid.z_center[k] - grid.z_center[k-1]
-
-        base_cz_p = (dx * dy) / dZ_p
-        base_cz_m = (dx * dy) / dZ_m
-        base_cy = (dx * dz_k_val) / dy
-        base_cx = (dy * dz_k_val) / dx
-        vol = dx * dy * dz_k_val
-
         m0 = mask[i, j, k]
-
+        
         cond_xm = base_cx * (mask[i-1, j, k] * m0)
         cond_xp = base_cx * (mask[i+1, j, k] * m0)
         cond_ym = base_cy * (mask[i, j-1, k] * m0)
         cond_yp = base_cy * (mask[i, j+1, k] * m0)
         cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
         cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
-
+        
         dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+        
         ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
              cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
              cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
-
-        b_val = rhs[i, j, k] * vol
-        # r = (-b_val) - (dd*p - ss) = -b_val - dd*p + ss
-        r_val = (-b_val - dd * p[i, j, k] + ss) * m0
-        @reduce(res_sq = 0.0 + r_val * r_val)
+        
+        # Ap = (-A) * p = (dd * p - ss)  (SPD form)
+        Ap[i, j, k] = (dd * p[i, j, k] - ss) * m0
     end
+end
 
+
+
+"""
+    calc_residual!(r, p, rhs, mask, grid, alpha)
+    
+Compute residual r = b - Ap and return ||r|| (b is negated for SPD form).
+If r is provided (Array), store the residual vector.
+If r is nothing, only compute the norm.
+"""
+function calc_residual!(
+    r::Union{Array{Float64, 3}, Nothing},
+    p::Array{Float64, 3},
+    rhs::Array{Float64, 3},
+    mask::Array{Float64, 3},
+    grid::GridData,
+    alpha::Float64
+)::Float64
+    mx, my, mz = grid.mx, grid.my, grid.mz
+    dx, dy = grid.dx, grid.dy
+    
+    res_sq = 0.0
+    
+    @inbounds for k in 3:mz-2, j in 3:my-2, i in 3:mx-2
+        dz_k = grid.dz[k]
+        dZ_p = grid.z_center[k+1] - grid.z_center[k]
+        dZ_m = grid.z_center[k] - grid.z_center[k-1]
+        
+        base_cz_p = (dx * dy) / dZ_p
+        base_cz_m = (dx * dy) / dZ_m
+        base_cy = (dx * dz_k) / dy
+        base_cx = (dy * dz_k) / dx
+        vol = dx * dy * dz_k
+        
+        m0 = mask[i, j, k]
+        
+        cond_xm = base_cx * (mask[i-1, j, k] * m0)
+        cond_xp = base_cx * (mask[i+1, j, k] * m0)
+        cond_ym = base_cy * (mask[i, j-1, k] * m0)
+        cond_yp = base_cy * (mask[i, j+1, k] * m0)
+        cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
+        cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
+        
+        dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
+        
+        ss = cond_xm * p[i-1, j, k] + cond_xp * p[i+1, j, k] +
+             cond_ym * p[i, j-1, k] + cond_yp * p[i, j+1, k] +
+             cond_zm * p[i, j, k-1] + cond_zp * p[i, j, k+1]
+        
+        b_val = -rhs[i, j, k] * vol
+        
+        # Use SPD form: A' = -A, b' = -b
+        # A' * p = dd * p - ss, r = b' - A' * p
+        r_val = (b_val - (dd * p[i, j, k] - ss)) * m0
+        
+        if r !== nothing
+            r[i, j, k] = r_val
+        end
+        res_sq += r_val * r_val
+    end
+    
     return sqrt(res_sq)
 end
 
@@ -585,43 +702,23 @@ function apply_preconditioner!(
         return
     end
     fill!(z, 0.0)
-    dx, dy = grid.dx, grid.dy
-    mx, my, mz = grid.mx, grid.my, grid.mz
     omega = 1.0
 
     for _ in 1:PRECONDITIONER_SWEEPS
-        for color in 0:1
-            @floop for k in 3:mz-2, j in 3:my-2
-                dz_k_val = grid.dz[k]
-                dZ_p = grid.z_center[k+1] - grid.z_center[k]
-                dZ_m = grid.z_center[k] - grid.z_center[k-1]
-
-                base_cz_p = (dx * dy) / dZ_p
-                base_cz_m = (dx * dy) / dZ_m
-                base_cy = (dx * dz_k_val) / dy
-                base_cx = (dy * dz_k_val) / dx
-                vol = dx * dy * dz_k_val
-                @simd for i in (3 + (j + k + color + 1) % 2):2:mx-2
-                    m0 = mask[i, j, k]
-                    
-                    cond_xm = base_cx * (mask[i-1, j, k] * m0)
-                    cond_xp = base_cx * (mask[i+1, j, k] * m0)
-                    cond_ym = base_cy * (mask[i, j-1, k] * m0)
-                    cond_yp = base_cy * (mask[i, j+1, k] * m0)
-                    cond_zm = base_cz_m * (mask[i, j, k-1] * m0)
-                    cond_zp = base_cz_p * (mask[i, j, k+1] * m0)
-
-                    dd = (1.0 - m0) + (cond_xm + cond_xp + cond_ym + cond_yp + cond_zm + cond_zp) + alpha * vol * m0
-                    ss = cond_xm * z[i-1, j, k] + cond_xp * z[i+1, j, k] +
-                         cond_ym * z[i, j-1, k] + cond_yp * z[i, j+1, k] +
-                         cond_zm * z[i, j, k-1] + cond_zp * z[i, j, k+1]
-
-                    b_val = r[i, j, k]
-                    dp = ((ss - b_val) / dd - z[i, j, k]) * m0
-                    z[i, j, k] += omega * dp
-                end
-            end
+        if precond == PrecondRBSOR
+            sor_sweep_rbsor!(z, r, mask, grid, alpha, omega)
+        elseif precond == PrecondSOR
+            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=false)
+        elseif precond == PrecondSSOR
+            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=false)
+            sor_sweep_lex!(z, r, mask, grid, alpha, omega; backward=true)
+        else # PrecondRBSSOR
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 0, 1, true)   # 前進 R→B
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 1, 0, false)  # 後退 B→R
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 1, 0, true)   # 前進 B→R
+            sor_sweep_rbssor!(z, r, mask, grid, alpha, omega, 0, 1, false)  # 後退 R→B
         end
+
         apply_periodic_pressure_if_needed!(z, grid, bc_set)
     end
 end
@@ -708,7 +805,7 @@ function solve_poisson_bicgstab!(
 
     # Initial residual r = b - A p
     apply_periodic_pressure_if_needed!(p, grid, bc_set)
-    res0 = calc_residual_cg!(r, p, rhs, mask, grid, par, alpha)
+    res0 = calc_residual!(r, p, rhs, mask, grid, alpha)
     if res0 == 0.0
         restore_rhs_mean!(rhs, mask, grid, rhs_avg)
         return (true, 0, 0.0)
