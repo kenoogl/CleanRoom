@@ -1,0 +1,41 @@
+{
+  "external_boundaries": {
+    "x_min": {
+      "velocity": {
+        "type": "inflow",
+        "value": [
+          5.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "x_max": {
+      "velocity": {
+        "type": "outflow"
+      }
+    },
+    "y_min": {
+      "velocity": {
+        "type": "periodic"
+      }
+    },
+    "y_max": {
+      "velocity": {
+        "type": "periodic"
+      }
+    },
+    "z_min": {
+      "velocity": {
+        "type": "wall"
+      }
+    },
+    "z_max": {
+      "velocity": {
+        "type": "wall"
+      }
+    }
+  },
+  "internal_boundaries": [],
+  "openings": []
+}
