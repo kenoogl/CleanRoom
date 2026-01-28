@@ -34,12 +34,12 @@
     "checkpoint": 500
   },
   "Poisson_parameter": {
-    "solver": "sor",
+    "solver": "cg",
     "coef_acceleration": 1.2,
     "convergence_criteria": 0.001,
     "Iteration_max": 1000,
     "on_divergence": "WarnContinue",
-    "preconditioner": "none"
+    "preconditioner": "sor"
   },
   "Start_time_for_averaging": 0.0,
   "Time_Integration_Scheme": "RK2",
