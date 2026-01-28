@@ -494,6 +494,7 @@ function solve_poisson_cg!(
     end
     
     # 2. Preconditioner: z = M^-1 r (Gauss-Seidel)
+    apply_periodic_pressure_if_needed!(r, grid, bc_set)
     apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner, bc_set)
     
     # 3. p = z
@@ -542,6 +543,7 @@ function solve_poisson_cg!(
         end
         
         # 9. Preconditioner: z = M^-1 r
+        apply_periodic_pressure_if_needed!(r, grid, bc_set)
         apply_preconditioner!(z, r, mask, grid, helm_alpha, config.preconditioner, bc_set)
         
         # 10. rho_new = r·z
@@ -842,6 +844,7 @@ function solve_poisson_bicgstab!(
         end
 
         # phat = M^-1 p
+        apply_periodic_pressure_if_needed!(pvec, grid, bc_set)
         apply_preconditioner!(phat, pvec, mask, grid, alpha, config.preconditioner, bc_set)
 
         # v = A * phat
@@ -872,6 +875,7 @@ function solve_poisson_bicgstab!(
         end
 
         # shat = M^-1 s
+        apply_periodic_pressure_if_needed!(r, grid, bc_set)
         apply_preconditioner!(shat, r, mask, grid, alpha, config.preconditioner, bc_set)
 
         # t = A * shat (reuse rhs array)
