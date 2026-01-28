@@ -10,7 +10,7 @@ using ..PressureSolver
 
 export MonitorData, MonitorConfig, init_monitor, log_step!, check_divergence
 export compute_u_max, compute_cfl, compute_divergence_max
-export calculate_stability_metrics, log_flow_rates, log_stability_violation
+export calculate_stability_metrics, log_flow_rates, log_flow_rates_history!, log_stability_violation
 
 struct MonitorData
     step::Int
@@ -283,7 +283,7 @@ function calculate_stability_metrics(
     end
 end
 
-function log_flow_rates(
+function log_flow_rates( # deprecated: use compute_net_face_flows + log_flow_rates_history! (keep for debug verbose output)
     buffers::CFDBuffers,
     grid::GridData,
     bc_set::BoundaryConditionSet
@@ -384,6 +384,85 @@ function log_flow_rates(
             y_max_io ? @sprintf(" y_max[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_ymax_out, flow_ymax_in, un_ymax_min, un_ymax_max) : " y_max[N/A]",
             z_min_io ? @sprintf(" z_min[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_zmin_out, flow_zmin_in, un_zmin_min, un_zmin_max) : " z_min[N/A]",
             z_max_io ? @sprintf(" z_max[out=%.4e in=%.4e un(%.3e..%.3e)]", flow_zmax_out, flow_zmax_in, un_zmax_min, un_zmax_max) : " z_max[N/A]")
+end
+
+function compute_net_face_flows(
+    buffers::CFDBuffers,
+    grid::GridData,
+    bc_set::BoundaryConditionSet
+)::NamedTuple{(:x_min, :x_max, :y_min, :y_max, :z_min, :z_max), Tuple{Float64, Float64, Float64, Float64, Float64, Float64}}
+    flow_xmin = 0.0; flow_xmax = 0.0
+    flow_ymin = 0.0; flow_ymax = 0.0
+    flow_zmin = 0.0; flow_zmax = 0.0
+
+    x_min_io = bc_set.x_min.velocity_type == Inflow || bc_set.x_min.velocity_type == Outflow
+    x_max_io = bc_set.x_max.velocity_type == Inflow || bc_set.x_max.velocity_type == Outflow
+    y_min_io = bc_set.y_min.velocity_type == Inflow || bc_set.y_min.velocity_type == Outflow
+    y_max_io = bc_set.y_max.velocity_type == Inflow || bc_set.y_max.velocity_type == Outflow
+    z_min_io = bc_set.z_min.velocity_type == Inflow || bc_set.z_min.velocity_type == Outflow
+    z_max_io = bc_set.z_max.velocity_type == Inflow || bc_set.z_max.velocity_type == Outflow
+
+    if x_min_io
+        @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2
+            un = -buffers.u_face_x[3, j, k]
+            area = grid.dy * grid.dz[k]
+            flow_xmin += un * area
+        end
+    end
+    if x_max_io
+        @inbounds for k in 3:grid.mz-2, j in 3:grid.my-2
+            un = buffers.u_face_x[grid.mx-1, j, k]
+            area = grid.dy * grid.dz[k]
+            flow_xmax += un * area
+        end
+    end
+    if y_min_io
+        @inbounds for k in 3:grid.mz-2, i in 3:grid.mx-2
+            un = -buffers.v_face_y[i, 3, k]
+            area = grid.dx * grid.dz[k]
+            flow_ymin += un * area
+        end
+    end
+    if y_max_io
+        @inbounds for k in 3:grid.mz-2, i in 3:grid.mx-2
+            un = buffers.v_face_y[i, grid.my-1, k]
+            area = grid.dx * grid.dz[k]
+            flow_ymax += un * area
+        end
+    end
+    if z_min_io
+        @inbounds for j in 3:grid.my-2, i in 3:grid.mx-2
+            un = -buffers.w_face_z[i, j, 3]
+            area = grid.dx * grid.dy
+            flow_zmin += un * area
+        end
+    end
+    if z_max_io
+        @inbounds for j in 3:grid.my-2, i in 3:grid.mx-2
+            un = buffers.w_face_z[i, j, grid.mz-1]
+            area = grid.dx * grid.dy
+            flow_zmax += un * area
+        end
+    end
+
+    return (x_min=flow_xmin, x_max=flow_xmax, y_min=flow_ymin, y_max=flow_ymax, z_min=flow_zmin, z_max=flow_zmax)
+end
+
+function log_flow_rates_history!(
+    buffers::CFDBuffers,
+    grid::GridData,
+    bc_set::BoundaryConditionSet,
+    step::Int,
+    time::Float64,
+    io::IO
+)
+    flows = compute_net_face_flows(buffers, grid, bc_set)
+    sum_flow = flows.x_min + flows.x_max + flows.y_min + flows.y_max + flows.z_min + flows.z_max
+    @printf(io, "%d %.4e %.4e %.4e %.4e %.4e %.4e %.4e %.4e\n",
+        step, time,
+        flows.x_min, flows.x_max, flows.y_min, flows.y_max, flows.z_min, flows.z_max, sum_flow
+    )
+    flush(io)
 end
 
 function log_stability_violation(

@@ -170,6 +170,19 @@ function run_simulation(param_file::String)
     
     # Calculate fixed time step (dimensionless)
     println("Fixed time step (dimensionless): Δt* = $dt_fixed")
+
+    flow_history_path = joinpath(out_dir, "flow_history.txt")
+    has_io_boundary = (bc_set.x_min.velocity_type == Inflow || bc_set.x_min.velocity_type == Outflow ||
+                       bc_set.x_max.velocity_type == Inflow || bc_set.x_max.velocity_type == Outflow ||
+                       bc_set.y_min.velocity_type == Inflow || bc_set.y_min.velocity_type == Outflow ||
+                       bc_set.y_max.velocity_type == Inflow || bc_set.y_max.velocity_type == Outflow ||
+                       bc_set.z_min.velocity_type == Inflow || bc_set.z_min.velocity_type == Outflow ||
+                       bc_set.z_max.velocity_type == Inflow || bc_set.z_max.velocity_type == Outflow)
+    if has_io_boundary
+        open(flow_history_path, "w") do io
+            println(io, "step time x- x+ y- y+ z- z+ sum")
+        end
+    end
     
     # Initialize Ghost Cells with BCs before first step
     apply_velocity_cc_bcs!(
@@ -235,11 +248,18 @@ function run_simulation(param_file::String)
         open(joinpath(out_dir, "history.txt"), "a") do io
             log_step!(mon_data, monitor_config; console_io=stdout, history_io=io)
         end
+        if has_io_boundary && (step % monitor_config.history_interval == 0 || step == 1)
+            open(flow_history_path, "a") do io
+                log_flow_rates_history!(buffers, grid, bc_set, step, time, io)
+            end
+        end
         if sim_params.debug && monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
             log_flow_rates(buffers, grid, bc_set)
         end
 
-        if sim_params.debug && monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
+        
+        #=
+        if monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
             uc = BoundaryConditions.compute_outflow_uc(
                 buffers.u, buffers.v, buffers.w, grid, buffers.mask, bc_set
             )
@@ -259,6 +279,7 @@ function run_simulation(param_file::String)
                 end
             end
         end
+        =#
 
         if cfl > 1.0 || diff_num >= 0.5
             log_stability_violation(

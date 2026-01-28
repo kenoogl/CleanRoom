@@ -1482,7 +1482,10 @@ end
 
 **Responsibilities & Constraints**
 - コンソールへのステップ情報表示（タイムステップ、時刻、Umax、CFL、発散、圧力残差）
-- debug有効時はdisplay間隔ごとにInflow/Outflow境界面の流量モニタ（正味流量、out/in分離、un最小/最大）を出力
+- 外部境界に Inflow/Outflow が存在する場合、history間隔ごとに外部境界面の無次元流量を履歴ファイルへ出力
+  - ヘッダ: `step time x- x+ y- y+ z- z+ sum`
+  - 外向き正の正味流量（各面）と全6面の合計（sum）
+- debug有効時はdisplay間隔ごとにInflow/Outflow境界面の流量モニタ（out/in分離、un最小/最大）を標準出力に出力
 - historyファイル（スペース区切りテキスト形式）への記録
 - 発散検出とエラー通知
 - history.txt は固定幅カラムで step, time, Umax, divMax, dU, ItrP, ResP を出力
