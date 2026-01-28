@@ -253,10 +253,11 @@ function run_simulation(param_file::String)
                 log_flow_rates_history!(buffers, grid, bc_set, step, time, io)
             end
         end
+        #= 
         if sim_params.debug && monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)
             log_flow_rates(buffers, grid, bc_set)
         end
-
+        =#
         
         #=
         if monitor_config.console_interval > 0 && (step % monitor_config.console_interval == 0 || step == 1)

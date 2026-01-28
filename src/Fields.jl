@@ -206,14 +206,14 @@ function update_time_average!(buffers::CFDBuffers, par::String)
 end
 
 """
-    estimate_memory_size(Nx, Ny, Nz; time_scheme=:Euler, solver=:RedBlackSOR)
+    estimate_memory_size(Nx, Ny, Nz; time_scheme=:Euler, solver=:RBSOR)
 
 メモリ使用量を見積もる（Byte単位）。
 """
 function estimate_memory_size(
     Nx::Int, Ny::Int, Nz::Int;
     time_scheme::Symbol = :Euler,
-    solver::Symbol = :RedBlackSOR
+    solver::Symbol = :RBSOR
 )::NamedTuple{(:bytes, :gb, :arrays, :breakdown), Tuple{Int, Float64, Int, String}}
     mx, my, mz = Nx + 4, Ny + 4, Nz + 4
     cell_count = mx * my * mz

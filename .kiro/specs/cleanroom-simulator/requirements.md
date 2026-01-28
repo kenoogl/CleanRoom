@@ -305,9 +305,10 @@ $$
 **Objective:** As a シミュレーションエンジニア, I want 圧力ポアソン方程式を反復法で解ける, so that 圧力場を効率的に計算できる
 
 #### Acceptance Criteria
-1. The Solver shall Red-Black SOR法による反復解法を実装する（必須）
+1. The Solver shall SOR / RBSOR / SSOR / RBSSOR 法による反復解法を実装する（必須）
 2. Where CG法が選択された場合, the Solver shall 共役勾配法を適用する（オプション）
 3. Where BiCGSTAB法が選択された場合, the Solver shall BiCGSTAB法を適用する（オプション）
+4. The Solver shall MultiGrid-SOR（MG-SOR）を実装し、V-cycle / W-cycle / FMG を選択できる（オプション）
 4. The Solver shall 加速係数、収束判定値、最大反復回数をパラメータとして受け付ける
 5. The Solver shall SOR残差を初期残差で正規化して評価する（H2方式）
 6. The Solver shall CG/BiCGSTABで前処理付き共役勾配法（Gauss-Seidel 4 sweep）を適用する
@@ -316,7 +317,8 @@ $$
 9. The Solver shall 収束後に常に圧力場の空間平均値（流体セルのみ）を計算し、流体セルは平均値を減算してゼロ平均化し、物体セルは平均値で埋める（圧力境界条件の定数不定性によるドリフト防止）
 10. When on_divergence="WarnContinue" の場合, the Solver shall 収束失敗時に警告を出力して計算を継続する（停止しない）
 11. When on_divergence="Abort" の場合, the Solver shall 収束失敗時にエラーを出力して計算を停止する
-12. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor）を選択できる（noneは前処理なし）
+12. When solver=CG/BiCGSTAB の場合, the Solver shall 前処理オプション（none, sor, rbsor, ssor, rbssor）を選択できる（noneは前処理なし）
+13. When solver=MG-SOR の場合, the Solver shall cycle オプション（V/W/FM G）と smoother オプション（sor/rbsor/ssor/rbssor）を選択できる
 
 #### 圧力平均値の引き戻し
 
@@ -805,12 +807,22 @@ mean_new = mean_old + (x - mean_old) / n
     "checkpoint": 10000                   // チェックポイント出力間隔[step]
   },
   "Poisson_parameter": {
-    "solver": "RedBlackSOR",              // (RedBlackSOR | CG | BiCGSTAB) ソルバー種別
-    "coef_acceleration": 0.9,             // RedBlackSOR加速係数（RedBlackSOR時のみ有効）
+    "solver": "rbsor",                    // (sor | rbsor | ssor | rbssor | cg | bicgstab | mgsor) ソルバー種別
+    "coef_acceleration": 0.9,             // SOR加速係数（sor/rbsor/ssor/rbssor時のみ有効）
     "convergence_criteria": 1.0e-3,       // 収束判定値
     "Iteration_max": 100,                 // 最大反復回数
     "on_divergence": "WarnContinue",      // (WarnContinue | Abort) 収束失敗時の動作
-    "preconditioner": "sor"               // (sor | none) CG/BiCGSTAB時の前処理
+    "preconditioner": "sor",              // (none | sor | rbsor | ssor | rbssor) CG/BiCGSTAB時の前処理
+    "mgsor": {                            // solver=mgsor のときのみ使用
+      "cycle": "V",                       // (V | W | FMG)
+      "smoother": "rbsor",                // (sor | rbsor | ssor | rbssor)
+      "pre_sweeps": 2,
+      "post_sweeps": 2,
+      "coarse_solver": "sor",
+      "coarse_max_iter": 50,
+      "max_levels": 6,
+      "restriction": "max"                // (max | avg)
+    }
   },
   "Start_time_for_averaging": 0.0,        // [sec] 平均化開始時刻
   "Time_Integration_Scheme": "Euler",     // (Euler | RK2 | RK4) 時間積分スキーム
@@ -1117,4 +1129,4 @@ end
 - 初期開発: 逐次計算
 - 将来: `FLoops.jl`によるスレッド並列
 - バックエンド抽象化: sequential/thread切替
-- Red-Black SORでの`@simd`活用
+- RBSORでの`@simd`活用

@@ -7,6 +7,7 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/test/params.json
   Kinematic Viscosity ν:   1.0000e-02 [m²/s] 
   Reynolds Number Re:             100        
   Reference Time T0:                1 [s]    
+  Mach Number M:                    0        
 
 --- Grid Parameters ---
   Grid Size (Nx,Ny,Nz):  (10, 10, 10)
@@ -23,11 +24,26 @@ Parameter File: /Users/Daily/Development/Cleanroom/CCSDD/test/params.json
   Courant Number:                 0.5
   Fixed Time Step Δt*:           0.05 (dimensionless)
   Fixed Time Step Δt:            0.05 [s]
+  Debug:                 no
+  Reverse Flow Stabilization: no
+  Diffusion Number:              0.05
   Max Steps:                       10
   Total Simulation Time:          0.5 [s]
 
+--- Boundary Conditions ---
+  x_min:     Inflow       (0.00, 0.00, 0.00)
+  x_max:     Outflow      
+  y_min:     Symmetric    
+  y_max:     Symmetric    
+  z_min:     Inflow       (0.00, 0.00, 0.00)
+  z_max:     Inflow       (0.00, 0.00, 0.00)
+  Openings:              1
+  Internal Boundaries:   0
+
 --- Poisson Solver ---
-  Solver:                RedBlackSOR
+  Solver:                RBSOR
+  Preconditioner:        N/A
+  SOR Omega:                      1.5
   Convergence Criteria:       1.0e-05
   Max Iterations:                 100
 

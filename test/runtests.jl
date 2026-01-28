@@ -76,7 +76,7 @@ using CleanroomSolver.InputReader
         # Capture output or verify files exists
         
         # Clean up output
-        out_dir = "output"
+        out_dir = joinpath(@__DIR__, "output")
         rm(out_dir, recursive=true, force=true)
         
         run_simulation(param_file)

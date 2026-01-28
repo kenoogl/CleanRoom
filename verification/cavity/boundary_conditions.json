@@ -12,7 +12,7 @@
     },
     "y_min": {
       "velocity": {
-        "type": "wall"
+        "type": "periodic"
       }
     },
     "y_max": {

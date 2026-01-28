@@ -5,7 +5,7 @@ using ..Grid
 using ..Fields
 
 export VelocityBCType, ExternalBC, Opening, OpeningFlowType, InternalBoundary, BoundaryConditionSet
-export Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow 
+export Outflow, Periodic, Symmetric, Wall, SlidingWall, Inflow, OpeningOutlet, OpeningInlet 
 export apply_outflow!, apply_velocity_cc_bcs!
 export apply_periodic_velocity_cc!, apply_periodic_pressure!, apply_periodic_velocity_cf!
 export apply_velocity_cf_bcs!, apply_boundary_mask!, apply_internal_boundary_mask!, apply_pressure_bcs!

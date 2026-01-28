@@ -33,7 +33,7 @@
     "checkpoint": 800
   },
   "Poisson_parameter": {
-    "solver": "RedBlackSOR",
+    "solver": "rbsor",
     "coef_acceleration": 1.7,
     "convergence_criteria": 1e-05,
     "Iteration_max": 1000,
